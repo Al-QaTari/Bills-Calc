@@ -1,0 +1,47 @@
+# =============================================================================
+# Treasury Bills Calculator - Git Ignore
+# حاسبة أذون الخزانة - تجاهل Git
+# =============================================================================
+
+# Environment variables and secrets
+.env
+
+# Local or temporary databases
+cbe_historical_data.db
+*.sqlite3
+*.db
+
+# Python cache directories
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment directories
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+.venv.bak/
+
+# Development environment files (IDE)
+.idea/
+.vscode/
+
+# System temporary files
+.DS_Store
+Thumbs.db
+
+# Pip temporary files
+pip-wheel-metadata/
+*.egg-info/
+dist/
+build/
+
+# Log and temporary result files
+*.log
+*.tmp
+
+# Backup installation files
+*.bak
