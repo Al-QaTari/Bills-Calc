@@ -1,0 +1,1177 @@
+/*
+=============================================================================
+| حاسبة أذون الخزانة - الأنماط الرئيسية
+| الوصف: ورقة أنماط مُعاد هيكلتها، قائمة على المكونات ومتغيرة،
+| لتسهيل الصيانة والتوسع.
+=============================================================================
+*/
+
+/*
+=============================================================================
+| 1. المتغيرات الجذرية والتصميم (Theming)
+| - تحكم مركزي في الألوان، الخطوط، المسافات، والظلال.
+| - هذا القسم هو لوحة التحكم الرئيسية لمظهر التطبيق.
+=============================================================================
+*/
+:root {
+    /* لوحة الألوان الرئيسية */
+    --color-primary: #3b82f6; /* اللون الأساسي (أزرق) */
+    --color-primary-light: #60a5fa; /* نسخة أفتح من اللون الأساسي */
+    --color-secondary: #8b5cf6; /* اللون الثانوي (بنفسجي) */
+    --color-secondary-light: #a78bfa; /* نسخة أفتح من اللون الثانوي */
+    --color-tertiary: #ec4899; /* اللون الثالث (وردي) */
+    --color-accent: #ffd700; /* لون التمييز (ذهبي) */
+    --color-accent-light: #ffe066; /* نسخة أفتح من لون التمييز */
+
+    /* ألوان حالات الاستخدام (نجاح، خطأ، تحذير) */
+    --color-success: #10b981; /* لون النجاح (أخضر) */
+    --color-success-dark: #059669; /* نسخة أغمق من لون النجاح */
+    --color-success-text: #34d399; /* لون النص للنجاح */
+    --color-danger: #ef4444; /* لون الخطر (أحمر) */
+    --color-danger-dark: #dc2626; /* نسخة أغمق من لون الخطر */
+    --color-danger-text: #f87171; /* لون النص للخطر */
+    --color-warning: #f59e0b; /* لون التحذير (أصفر) */
+    --color-warning-text: #fbbf24; /* لون النص للتحذير */
+    --color-info: #06b6d4; /* لون المعلومات (سماوي) */
+    --color-info-text: #22d3ee; /* لون النص للمعلومات */
+
+    /* ألوان الخلفيات والأسطح */
+    --bg-gradient-start: #0f172a; /* بداية التدرج اللوني للخلفية (أزرق داكن) */
+    --bg-gradient-mid: #1e293b; /* منتصف التدرج اللوني للخلفية */
+    --bg-gradient-end: #334155; /* نهاية التدرج اللوني للخلفية */
+    --surface-color: rgba(30, 41, 59, 0.9); /* لون الأسطح (مثل البطاقات) مع شفافية */
+    --surface-color-alt: rgba(51, 65, 85, 0.9); /* لون بديل للأسطح */
+    --surface-border: rgba(59, 130, 246, 0.3); /* لون حدود الأسطح */
+
+    /* ألوان النصوص */
+    --text-primary: #f8fafc; /* لون النص الأساسي (أبيض) */
+    --text-secondary: #e2e8f0; /* لون النص الثانوي (أبيض باهت) */
+    --text-muted: #94a3b8; /* لون النص الخافت (رمادي) */
+    --text-dark: #111; /* لون النص الداكن (للاستخدام على خلفيات فاتحة) */
+
+    /* الخطوط (Typography) */
+    --font-family-main: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; /* عائلة الخطوط الرئيسية */
+    --font-family-code: 'Courier New', monospace; /* عائلة الخطوط للكود والمعادلات */
+
+    /* الأحجام والمسافات */
+    --border-radius-sm: 8px; /* نصف قطر الحواف الصغير */
+    --border-radius-md: 15px; /* نصف قطر الحواف المتوسط */
+    --border-radius-lg: 20px; /* نصف قطر الحواف الكبير */
+    --padding-sm: 1rem; /* الحشوة الصغيرة */
+    --padding-md: 1.5rem; /* الحشوة المتوسطة */
+    --padding-lg: 2.5rem; /* الحشوة الكبيرة */
+
+    /* الظلال */
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2); /* الظل الصغير */
+    --shadow-md: 0 8px 32px rgba(0, 0, 0, 0.3); /* الظل المتوسط */
+    --shadow-lg: 0 12px 40px rgba(59, 130, 246, 0.2); /* الظل الكبير */
+    --shadow-glow-primary: 0 0 20px rgba(59, 130, 246, 0.3); /* ظل متوهج باللون الأساسي */
+}
+
+/*
+=============================================================================
+| 2. الأنماط الأساسية والعامة
+| - تنسيقات تطبق على مستوى الصفحة بأكملها مثل الخلفية والخطوط.
+=============================================================================
+*/
+html, body {
+    direction: rtl !important; /* تحديد اتجاه النص من اليمين لليسار للتوافق مع العربية */
+    background: linear-gradient(135deg, var(--bg-gradient-start) 0%, var(--bg-gradient-mid) 50%, var(--bg-gradient-end) 100%); /* خلفية متدرجة للصفحة */
+    min-height: 100vh; /* أقل ارتفاع للصفحة يملأ الشاشة */
+    color: var(--text-primary); /* لون النص الافتراضي */
+    font-family: var(--font-family-main); /* الخط الافتراضي */
+}
+
+/* شريط التمرير المخصص */
+::-webkit-scrollbar { width: 8px; } /* عرض شريط التمرير */
+::-webkit-scrollbar-track { background: var(--bg-gradient-mid); } /* لون مسار شريط التمرير */
+::-webkit-scrollbar-thumb { background: linear-gradient(180deg, var(--color-primary), var(--color-secondary)); border-radius: 4px; } /* لون مقبض شريط التمرير */
+::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, var(--color-primary-light), var(--color-secondary-light)); } /* لون المقبض عند مرور الماوس */
+
+/*
+=============================================================================
+| 3. الرسوم المتحركة (Keyframe Animations)
+| - تعريف الحركات المستخدمة في التطبيق لإضافة لمسة جمالية.
+=============================================================================
+*/
+@keyframes fadeInUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } } /* ظهور العنصر من أسفل لأعلى */
+@keyframes bounce { 0%,20%,50%,80%,100%{transform:translateY(0);} 40%{transform:translateY(-10px);} 60%{transform:translateY(-5px);} } /* حركة ارتدادية */
+@keyframes shimmer { 0%,100%{opacity:0.6;} 50%{opacity:1;} } /* تأثير وميض خفيف */
+@keyframes rotate { from{transform:rotate(0deg);} to{transform:rotate(360deg);} } /* دوران كامل */
+@keyframes pulse { 0%,100%{transform:scale(1);} 50%{transform:scale(1.05);} } /* تأثير نبض */
+@keyframes shimmer-effect { 0%{left:-100%;} 100%{left:100%;} } /* تأثير لمعان متحرك */
+@keyframes cardFloat { from{opacity:0;transform:translateY(20px);} to{opacity:1;transform:translateY(0);} } /* حركة طفو للبطاقات */
+@keyframes iconGlow { 0%,100%{text-shadow:0 0 5px rgba(59,130,246,0.5);} 50%{text-shadow:0 0 20px rgba(59,130,246,0.8);} } /* توهج للأيقونات */
+@keyframes valuePulse { 0%,100%{transform:scale(1);} 50%{transform:scale(1.05);} } /* نبض للقيم الرقمية */
+@keyframes resultsSlideIn { from{opacity:0;transform:translateY(30px) scale(0.95);} to{opacity:1;transform:translateY(0) scale(1);} } /* دخول النتائج مع انزلاق */
+@keyframes successBounce { 0%{transform:scale(0);} 50%{transform:scale(1.2);} 100%{transform:scale(1);} } /* حركة ارتداد للنجاح */
+@keyframes badgeGlow { 0%,100%{box-shadow:0 5px 20px rgba(16,185,129,0.4);} 50%{box-shadow:0 5px 30px rgba(16,185,129,0.6);} } /* توهج للشارات */
+@keyframes badgeShimmer { 0%{left:-100%;} 100%{left:100%;} } /* لمعان للشارات */
+@keyframes metricFadeIn { from{opacity:0;transform:translateY(20px);} to{opacity:1;transform:translateY(0);} } /* ظهور تدريجي للمقاييس */
+@keyframes blink { 0%,50%{opacity:1;} 51%,100%{opacity:0.7;} } /* تأثير وميض (يظهر ويختفي) */
+@keyframes slideInFromTop { from{opacity:0;transform:translateY(-20px);} to{opacity:1;transform:translateY(0);} } /* انزلاق من الأعلى */
+@keyframes float { 0%,100%{transform:translateY(0);} 50%{transform:translateY(-10px);} } /* حركة طفو لأعلى وأسفل */
+
+
+/*
+=============================================================================
+| 4. مكونات التخطيط (فواصل، مسافات)
+| - عناصر تستخدم لتنظيم المحتوى والفصل بين الأقسام.
+=============================================================================
+*/
+.section-divider { /* الفاصل بين الأقسام */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 3rem 0;
+    animation: fadeInUp 1s ease-out;
+}
+.divider-line { /* الخط في الفاصل */
+    flex-grow: 1;
+    height: 1px;
+    background: linear-gradient(to right, transparent, rgba(41, 120, 246, 0.629), transparent);
+}
+.divider-icon { /* الأيقونة في منتصف الفاصل */
+    font-size: 1.8rem;
+    color: var(--color-accent);
+    margin: 0 1.5rem;
+    animation: rotate 10s linear infinite;
+    text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+}
+.spacer-div { height: 2rem; } /* عنصر لإضافة مسافة عمودية فارغة */
+
+/*
+=============================================================================
+| 5. المكونات الأساسية (بطاقات، أزرار، نماذج)
+| - التنسيقات العامة للعناصر التفاعلية الرئيسية في التطبيق.
+=============================================================================
+*/
+
+/* --- البطاقة الأساسية --- */
+.card, .tenor-card, .metric-card, .date-card, .insight-card, .update-buttons-card, .light-hero-card, .equations-expander, .additional-notes, .results-card {
+    background: var(--surface-color); /* لون خلفية البطاقة */
+    border: 1px solid var(--surface-border); /* حدود البطاقة */
+    border-radius: var(--border-radius-md); /* حواف دائرية */
+    padding: var(--padding-lg); /* حشوة داخلية */
+    margin: 1.5rem 0; /* هامش خارجي */
+    backdrop-filter: blur(10px); /* تأثير ضبابي للخلفية خلف البطاقة */
+    box-shadow: var(--shadow-md); /* ظل البطاقة */
+    transition: all 0.3s ease; /* حركة انتقال ناعمة للتأثيرات */
+    text-align: center; /* محاذاة النص في المنتصف */
+    position: relative; /* لتحديد موضع العناصر الداخلية */
+    overflow: hidden; /* إخفاء أي محتوى يتجاوز حدود البطاقة */
+    animation: fadeInUp 0.8s ease-out; /* حركة ظهور البطاقة */
+}
+.card:hover { /* تأثيرات عند مرور الماوس فوق البطاقة */
+    transform: translateY(-5px) scale(1.01); /* رفع البطاقة وتكبيرها قليلاً */
+    box-shadow: var(--shadow-lg); /* زيادة الظل */
+    border-color: var(--color-primary); /* تغيير لون الحدود */
+}
+.card::before { /* عنصر زائف لتأثير اللمعان عند مرور الماوس */
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(59,130,246,0.1), transparent);
+    transition: left 0.5s ease;
+}
+.card:hover::before {
+    left: 100%; /* تحريك اللمعان عبر البطاقة */
+}
+
+/* --- تعديلات على البطاقات --- */
+.card--header, .centered-header { /* تنسيق خاص لرأس الصفحة أو البطاقة */
+    padding: 2rem;
+    background: linear-gradient(135deg, rgba(59,130,246,0.1) 0%, rgba(139,92,246,0.1) 50%, rgba(236,72,153,0.1) 100%);
+    border-color: rgba(59,130,246,0.2);
+    border-radius: var(--border-radius-lg);
+}
+.card--section-header, .section-header { /* تنسيق رأس القسم */
+    padding: 2rem;
+    margin: 1.5rem 0;
+    background: linear-gradient(135deg, rgba(59,130,246,0.08) 0%, rgba(139,92,246,0.08) 50%, rgba(236,72,153,0.08) 100%);
+    border-color: rgba(59,130,246,0.13);
+    border-radius: var(--border-radius-lg);
+    text-align: center !important;
+}
+.card--results, .results-card { /* تنسيق بطاقة عرض النتائج */
+    padding: 2.2rem 1.2rem 1.5rem 1.2rem;
+    border-radius: 18px;
+    background: linear-gradient(135deg, #232946 0%, #23272f 100%);
+}
+.card--tenor, .tenor-card { /* تنسيق بطاقة عرض أجل الإذن */
+    background: linear-gradient(135deg, var(--surface-color) 0%, var(--surface-color-alt) 100%);
+    border: 3px solid rgba(246, 255, 0, 0.671);
+    padding: 2.5rem 1.5rem;
+    min-height: 160px;
+    min-width: 450px;
+    max-width: 550px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+.card--metric, .metric-card { /* تنسيق بطاقة عرض المقاييس (الأرقام) */
+    padding: var(--padding-md);
+    margin: 1rem 0;
+    animation: fadeInUp 0.6s ease-out;
+}
+.card--date, .date-card { /* تنسيق بطاقة عرض التاريخ */
+    padding: 1rem 1.5rem;
+    min-width: 140px;
+    max-width: 160px;
+    border-radius: 12px;
+}
+.card--insight, .insight-card { /* تنسيق بطاقة عرض الإحصاءات */
+    padding: 1.2rem 2rem;
+    min-width: 220px;
+    max-width: 320px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+.card--update-buttons, .update-buttons-card { /* تنسيق بطاقة أزرار التحديث */
+    border-radius: var(--border-radius-lg);
+    border-color: var(--surface-border);
+    animation: fadeInUp 0.8s ease-out, shimmer-effect 4s infinite;
+}
+
+/* --- الأزرار --- */
+.stButton > button { /* تنسيق أزرار Streamlit الافتراضية */
+    background: linear-gradient(135deg, var(--color-primary), var(--color-secondary)) !important;
+    border: none !important;
+    border-radius: 12px !important;
+    padding: 1rem 2.5rem !important;
+    font-size: 1.2rem !important;
+    font-weight: 700 !important;
+    color: white !important;
+    cursor: pointer !important;
+    transition: all 0.3s ease !important;
+    position: relative !important;
+    overflow: hidden !important;
+    box-shadow: 0 4px 15px rgba(59,130,246,0.3) !important;
+    width: 100% !important;
+    height: 3.5rem !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    text-align: center !important;
+    letter-spacing: 0.5px !important;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
+}
+.stButton > button:hover { /* تأثيرات عند مرور الماوس فوق الزر */
+    transform: translateY(-3px) !important;
+    box-shadow: 0 8px 25px rgba(59,130,246,0.4) !important;
+    background: linear-gradient(135deg, var(--color-primary-light), var(--color-secondary-light)) !important;
+}
+.stButton > button:active { /* تأثيرات عند الضغط على الزر */
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 15px rgba(59,130,246,0.3) !important;
+}
+.stButton > button:disabled { /* تنسيق الزر عند تعطيله */
+    background: linear-gradient(135deg, #64748b, #475569) !important;
+    cursor: not-allowed !important;
+    transform: none !important;
+    box-shadow: 0 2px 8px rgba(100,116,139,0.2) !important;
+    opacity: 0.7 !important;
+}
+
+/* --- حقول الإدخال --- */
+.input-label { /* تنسيق عنوان حقل الإدخال */
+    display: block;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+.stTextInput > div > div > input,
+.stNumberInput > div > div > input,
+.stSelectbox > div > div > select { /* تنسيق حقول الإدخال في Streamlit */
+    background: var(--surface-color) !important;
+    border: 2px solid var(--surface-border) !important;
+    border-radius: 10px !important;
+    color: var(--text-primary) !important;
+    padding: 0.75rem 1rem !important;
+    font-size: 1rem !important;
+    transition: all 0.3s ease !important;
+}
+.stTextInput > div > div > input:focus,
+.stNumberInput > div > div > input:focus,
+.stSelectbox > div > div > select:focus { /* تنسيق حقول الإدخال عند التركيز عليها */
+    outline: none !important;
+    border-color: var(--color-primary) !important;
+    box-shadow: 0 0 0 3px rgba(59,130,246,0.2) !important;
+    transform: translateY(-2px) !important;
+}
+
+/*
+=============================================================================
+| 6. أنماط المكونات المحددة
+| - تنسيقات خاصة بمكونات معينة مثل رؤوس النتائج، بطاقات المقاييس، إلخ.
+=============================================================================
+*/
+
+/* --- رؤوس الصفحات والأقسام --- */
+.results-header { /* تنسيق رأس قسم النتائج */
+    display: flex;
+    align-items: center;
+    gap: 1.1rem;
+    margin-bottom: 1.1rem;
+    justify-content: center !important;
+    text-align: center !important;
+}
+.results-header-icon { /* أيقونة رأس قسم النتائج */
+    font-size: 2.8rem !important;
+    margin-left: 0.2rem;
+    color: var(--color-accent);
+    filter: drop-shadow(0 2px 8px #000a);
+}
+.centered-header h1 { /* عنوان H1 في الرأس الرئيسي */
+    font-size: 3rem;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 1rem;
+    background: linear-gradient(120deg, #fff 30%, #e0e0e0 50%, #fff 70%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    text-shadow: 0 0 6px #fff, 0 0 16px #e0e0e0;
+    letter-spacing: 1.5px;
+}
+.centered-header p { /* الفقرة في الرأس الرئيسي */
+    font-size: 1.3rem;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+}
+.section-header .section-icon { /* أيقونة رأس القسم */
+    font-size: 3.2rem !important;
+    margin-bottom: 0.8rem !important;
+    animation: bounce 1.5s ease-in-out infinite;
+    color: var(--color-accent) !important;
+    filter: drop-shadow(0 2px 8px #000a) !important;
+}
+.section-header .section-title { /* عنوان رأس القسم */
+    font-size: 2.8rem !important;
+    font-weight: 900 !important;
+    color: var(--text-primary) !important;
+    margin-bottom: 0.8rem !important;
+    text-align: center !important;
+}
+.section-header .section-subtitle { /* العنوان الفرعي لرأس القسم */
+    font-size: 1.4rem !important;
+    color: var(--text-muted) !important;
+    font-weight: 500 !important;
+    text-align: center !important;
+}
+
+/* --- النتائج والمقاييس --- */
+.results-title { /* عنوان النتائج */
+    font-size: 2.7rem !important;
+    font-weight: 900;
+    color: #fff;
+    text-shadow: 0 2px 8px #000a;
+}
+.metric-title { /* عنوان المقياس (مثل: صافي الربح) */
+    font-size: 1rem;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+.metric-value { /* قيمة المقياس (مثل: 5,000 جنيه) */
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+/* تخصيص ألوان قيم المقاييس بناءً على الفئة */
+.metric-card.blue .metric-value { color: var(--color-primary-light); }
+.metric-card.green-dark .metric-value { color: var(--color-success-text); }
+.metric-card.yellow .metric-value { color: var(--color-warning-text); }
+.metric-card.red .metric-value { color: var(--color-danger-text); }
+.metric-card.green-light .metric-value { color: var(--color-success-text); }
+.metric-card.purple .metric-value { color: var(--color-secondary-light); }
+.metric-card.cyan .metric-value { color: var(--color-info-text); }
+.metric-card.gold .metric-value { color: var(--color-accent-light); }
+
+.metric-card-container-centered { /* حاوية لتوسيط بطاقات المقاييس */
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    margin-top: 10px;
+    margin-bottom: 10px;
+}
+
+.tenor-card-icon { /* أيقونة بطاقة الأجل */
+    font-size: 1.4rem;
+    margin-bottom: 0.3rem;
+    animation: iconGlow 2s ease-in-out infinite;
+}
+.tenor-card-label { /* عنوان بطاقة الأجل */
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 0.3rem;
+    letter-spacing: 0.2px;
+}
+.tenor-card-value { /* قيمة بطاقة الأجل */
+    font-size: 2.9rem;
+    font-weight: 900;
+    color: #fff;
+    margin-bottom: 0.1rem;
+    letter-spacing: 0.3px;
+    text-shadow: 0 2px 8px #0005;
+}
+
+/* تخصيص ألوان خلفية بطاقات الأجل */
+.tenor-card--default {
+    background: linear-gradient(135deg,#232946 0%,#3b4254 100%);
+}
+.tenor-card--blue {
+    background: linear-gradient(135deg,#232946 0%,#4e54c8 100%);
+}
+.tenor-card--green {
+    background: linear-gradient(135deg,#232946 0%,#059669 100%);
+}
+.tenor-card--purple {
+    background: linear-gradient(135deg,#232946 0%,#8b5cf6 100%);
+}
+.tenor-card--yellow {
+    background: linear-gradient(135deg,#232946 0%,#f59e0b 100%);
+}
+.tenor-card--white {
+    background: linear-gradient(135deg,#232946 0%,#94a3b8 100%);
+}
+
+.auction-title-container { /* حاوية عنوان المزاد */
+    text-align: center;
+    margin: 2rem 0 1rem 0;
+}
+.auction-title-span { /* تنسيق عنوان المزاد نفسه */
+    display: inline-block;
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    padding: 1rem 2rem;
+    background: linear-gradient(135deg, rgba(59,130,246,0.2) 0%, rgba(139,92,246,0.2) 50%, rgba(236,72,153,0.2) 100%);
+    border-radius: var(--border-radius-lg);
+    border: 2px solid var(--surface-border);
+    position: relative;
+    overflow: hidden;
+    animation: pulse 2s ease-in-out infinite;
+}
+.auction-title-span::before { /* تأثير اللمعان لعنوان المزاد */
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+    animation: shimmer-effect 3s infinite;
+}
+.auction-info-container { /* حاوية معلومات المزاد */
+    text-align: center;
+    margin: 1rem 0;
+    padding: 1rem;
+    background: var(--surface-color);
+    border-radius: 10px;
+    border: 1px solid var(--surface-border);
+    animation: fadeInUp 1s ease-out;
+}
+.auction-info-note { /* ملاحظة داخل معلومات المزاد */
+    display: block;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    margin-top: 0.5rem;
+    font-style: italic;
+}
+.light-hero-card { /* بطاقة الرأس الرئيسية */
+    background: #23272f;
+    color: var(--color-accent);
+    border-radius: 18px;
+    box-shadow: 0 4px 24px 0 rgba(0,0,0,0.18);
+    padding: 2rem 1.2rem 1.5rem 1.2rem;
+    margin: 2.5rem 0;
+    text-align: center;
+    border: 1.5px solid #444a57;
+    animation: fadeInUp 1.1s cubic-bezier(.23,1.01,.32,1) 0.1s both;
+}
+.light-hero-card .hero-icon { /* أيقونة بطاقة الرأس */
+    font-size: 3.2rem;
+    display: inline-block;
+    margin-bottom: 0.7rem;
+    animation: bounce 1.6s infinite;
+    filter: drop-shadow(0 2px 8px #000a);
+}
+.light-hero-card h1 { /* عنوان بطاقة الرأس */
+    font-size: 2.5rem;
+    font-weight: 800;
+    margin-bottom: 0.7rem;
+    letter-spacing: 0.5px;
+    color: #fff;
+    text-shadow: 0 2px 8px #000a;
+}
+.light-hero-card p { /* فقرة بطاقة الرأس */
+    font-size: 1.18rem;
+    margin-bottom: 0.7rem;
+    font-weight: 500;
+    color: var(--color-accent);
+    text-shadow: 0 1px 4px #0008;
+}
+.author-info { /* معلومات المؤلف */
+    font-size: 1.08rem;
+    color: var(--color-accent-light);
+    margin-top: 0.5rem;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+}
+.author-info span { /* اسم المؤلف */
+    color: #fff;
+    font-weight: bold;
+    text-shadow: 0 1px 4px #0008;
+}
+.blinking-text { /* نص وامض (للعد التنازلي) */
+    animation: pulse 2s ease-in-out infinite;
+    font-weight: 600;
+    text-align: center;
+    font-size: 1.4rem;
+    margin: 0.8rem 0;
+    padding: 0.5rem;
+    border-radius: var(--border-radius-sm);
+    background: rgba(59,130,246,0.1);
+    border: 1px solid rgba(59,130,246,0.2);
+    text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+.countdown-remaining { /* تخصيص لون العد التنازلي */
+    color: var(--color-warning-text);
+}
+.card-msg { /* رسالة داخل البطاقة */
+    text-align: center;
+    font-size: 1.3rem;
+    margin-top: 1rem;
+    font-weight: 500;
+    line-height: 1.6;
+    padding: 0.8rem;
+    border-radius: 10px;
+    background: rgba(59,130,246,0.08);
+    border: 1px solid rgba(59,130,246,0.15);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+.cbe-link-btn { /* زر رابط البنك المركزي */
+    background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+    color: var(--text-secondary);
+    padding: 0.7em 2.2em;
+    border: none;
+    border-radius: var(--border-radius-sm);
+    font-size: 1.1em;
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+    transition: background 0.2s, color 0.2s, transform 0.15s;
+}
+.cbe-link-btn:hover { /* تأثيرات عند مرور الماوس فوق زر البنك المركزي */
+    background: linear-gradient(90deg, #5182c8 0%, #6791d6 100%);
+    color: #ffffff;
+    transform: translateY(-2px) scale(1.04);
+}
+.back-to-top { /* زر "العودة للأعلى" */
+    position: fixed;
+    bottom: 32px;
+    left: 32px; /* تم نقله إلى اليسار */
+    z-index: 1000;
+    width: 54px;
+    height: 54px;
+    background: linear-gradient(135deg, var(--color-accent) 60%, var(--color-accent-light) 100%);
+    color: var(--text-dark);
+    font-size: 2.1rem;
+    font-weight: 900;
+    border-radius: 50%;
+    box-shadow: 0 4px 18px 0 rgba(0,0,0,0.18);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    transition: box-shadow 0.18s, transform 0.18s, background 0.18s;
+    border: 2.5px solid var(--color-accent-light);
+    opacity: 0.92;
+}
+.back-to-top:hover { /* تأثيرات عند مرور الماوس فوق زر "العودة للأعلى" */
+    box-shadow: 0 8px 32px 0 rgb(255, 255, 255);
+    background: linear-gradient(135deg, var(--color-accent-light) 60%, var(--color-accent) 100%);
+    color: #111;
+    transform: scale(1.09) translateY(-4px);
+    opacity: 1;
+}
+.tenor-cards-container, .date-cards-container { /* حاوية بطاقات الأجل والتاريخ */
+    display: flex;
+    justify-content: center;
+    align-items: stretch;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    margin: 1.5rem 0 2rem 0;
+}
+
+.date-card { /* بطاقة التاريخ */
+    background: var(--surface-color-alt);
+    border: 1px solid var(--surface-border);
+    border-radius: var(--border-radius-md);
+    padding: 1rem;
+    text-align: center;
+    min-width: 150px;
+    transition: all 0.3s ease;
+}
+
+.date-card:hover { /* تأثيرات عند مرور الماوس فوق بطاقة التاريخ */
+    transform: translateY(-5px);
+    box-shadow: var(--shadow-lg);
+}
+
+.date-title { /* عنوان التاريخ */
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+}
+
+.date-value { /* قيمة التاريخ */
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+/* --- الشارات والرسائل --- */
+.net-profit-badge-container, .net-loss-badge-container { /* حاوية شارة الربح/الخسارة */
+    text-align: center;
+    margin: 1.5rem 0;
+}
+.net-profit-badge, .net-loss-badge { /* تنسيق شارة الربح/الخسارة */
+    display: inline-block;
+    padding: 1rem 2rem;
+    border-radius: 50px;
+    font-size: 1.2rem;
+    font-weight: 700;
+    position: relative;
+    overflow: hidden;
+    animation: badgeGlow 2s ease-in-out infinite;
+}
+.net-profit-badge { background: linear-gradient(135deg, var(--color-success), var(--color-success-dark)); color: white; } /* شارة الربح */
+.net-loss-badge { background: linear-gradient(135deg, var(--color-danger), var(--color-danger-dark)); color: white; } /* شارة الخسارة */
+.update-message { /* رسالة التحديث */
+    padding: 1.5rem;
+    border-radius: 10px;
+    margin: 1rem 0;
+    animation: fadeInUp 0.5s ease-out;
+    text-align: center;
+    font-size: 1.1rem;
+    border: 1px solid;
+}
+/* تخصيص ألوان رسالة التحديث بناءً على الحالة */
+.update-message.error { background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.3); color: #fca5a5; }
+.update-message.info { background: rgba(59,130,246,0.1); border-color: rgba(59,130,246,0.3); color: #93c5fd; }
+.update-message.success { background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.3); color: #34d399; }
+
+/* --- قسم المعادلات القابل للطي --- */
+.equations-expander { /* حاوية المعادلات */
+    background: var(--surface-color) !important;
+    border: 1px solid var(--surface-border) !important;
+    border-radius: var(--border-radius-md) !important;
+    padding: var(--padding-lg) !important;
+    margin: 1rem 0 !important;
+}
+.equations-expander h4 { /* عنوان قسم المعادلات */
+    color: var(--color-accent) !important;
+    font-size: 1.4rem !important;
+}
+.equations-expander .formula-item { /* عنصر المعادلة */
+    background: rgba(59,130,246,0.1) !important;
+    border: 1px solid rgba(59,130,246,0.2) !important;
+    border-radius: var(--border-radius-sm) !important;
+    padding: var(--padding-md) !important;
+    margin: 1rem 0 !important;
+}
+.equations-expander .formula-item b { color: var(--color-accent) !important; } /* تمييز جزء من المعادلة */
+.equations-expander .formula-value { /* تنسيق قيمة المعادلة */
+    color: var(--color-primary-light) !important;
+    background: rgba(96,165,250,0.1) !important;
+    padding: 0.3rem 0.6rem !important;
+    border-radius: 6px !important;
+    font-family: var(--font-family-code) !important;
+}
+
+/* --- مكونات أخرى متنوعة --- */
+.results-grid { /* شبكة عرض النتائج */
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1rem;
+    padding: 1rem;
+    background-color: #1e1e1e;
+    border-radius: 8px;
+}
+.result-item { /* عنصر في شبكة النتائج */
+    background-color: #2a2a2a;
+    padding: 1rem;
+    border-radius: 6px;
+    text-align: center;
+}
+.result-label { /* عنوان النتيجة */
+    display: block;
+    font-size: 0.9rem;
+    color: #aaa;
+    margin-bottom: 0.5rem;
+}
+.result-value { /* قيمة النتيجة */
+    display: block;
+    font-size: 1.2rem;
+    font-weight: bold;
+    color: #fff;
+}
+.notes { /* قسم الملاحظات */
+    margin-top: 1rem;
+    padding: 1rem;
+    background-color: #2a2a2a;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    color: #ccc;
+}
+.notes p {
+    margin: 0.5rem 0;
+}
+.centered-container { /* حاوية لتوسيط العناصر */
+    margin-top: 1.2rem;
+    text-align: center;
+}
+.formula-value { /* قيمة معادلة عامة */
+    color: #60a5fa;
+    background: rgba(96,165,250,0.1);
+    padding: 0.3rem 0.6rem;
+    border-radius: 6px;
+    font-family: 'Courier New', monospace;
+    font-weight: 600;
+}
+.formula-secondary-sale { /* قيمة معادلة البيع الثانوي */
+    color: #fbbf24;
+    background: rgba(251,191,36,0.1);
+    padding: 0.3rem 0.6rem;
+    border-radius: 6px;
+    font-family: 'Courier New', monospace;
+    font-weight: 600;
+    border: 1px solid rgba(251,191,36,0.3);
+}
+.next-auction-date-beauty span { /* تنسيق تاريخ المزاد القادم */
+    font-size: 1.45rem;
+    font-weight: 900;
+    color: #ffd700;
+    background: rgba(35,39,47,0.60);
+    padding: 0.38em 1.6em;
+    margin: 0.5em 0 1.1em 0;
+    border-radius: 12px;
+    display: inline-block;
+    box-shadow: 0 2px 10px #0002;
+    letter-spacing: 0.7px;
+}
+.fee-card { /* بطاقة رسوم الحفظ */
+    max-width: 480px;
+    margin: 0 auto;
+}
+.fee-card-header { /* رأس بطاقة الرسوم */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+.fee-card-icon {
+    font-size: 1.7rem;
+}
+.fee-card-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #fbbf24;
+}
+.fee-card-description {
+    color: #cbd5e1;
+    font-size: 1rem;
+    margin-bottom: 1.2rem;
+}
+.fee-results-container { /* حاوية نتائج حساب الرسوم */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-top: 1.5rem;
+}
+.fee-results-label {
+    color: #fbbf24;
+    font-size: 1.05rem;
+    font-weight: 500;
+    margin-bottom: 0.7rem;
+}
+.fee-results-value {
+    min-width: 120px;
+    max-width: 250px;
+    margin-bottom: 0.7rem;
+    font-size: 2.0rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.fee-results-note {
+    color: #fbbf24;
+    font-size: 0.97rem;
+    margin-top: 0.5rem;
+    text-align: center;
+}
+.secret-panel-title {
+    color: #e94560;
+}
+.secret-panel-title.centered {
+    text-align: center;
+}
+.admin-section-title {
+    color: #4cc9f0;
+}
+.admin-section-title.db-info {
+    color: #4cc9f0;
+}
+.admin-section-title.telegram-alerts {
+    color: #06d6a0;
+}
+.admin-subsection-title {
+    color: #118ab2;
+}
+.admin-subsubsection-title {
+    color: #118ab2;
+}
+.admin-section-title.db-content {
+    color: #90be6d;
+}
+.admin-subsection-title.historical-data {
+    color: #f9c74f;
+}
+.admin-section-title.connection-test {
+    color: #e63946;
+}
+.admin-section-title.force-update {
+    color: #4cc9f0;
+}
+.admin-section-title.danger-zone-title {
+    color: #e63946;
+}
+.session-timer {
+    text-align: center;
+    background-color: #1a1a2e;
+    color: white;
+    padding: 5px;
+    border-radius: 5px;
+    margin-bottom: 15px;
+}
+.secret-panel-hr {
+    border: 1px solid #4cc9f0;
+}
+
+/*
+=============================================================================
+| 7. تعديلات Streamlit والتصميم المتجاوب
+| - تجاوز بعض أنماط Streamlit الافتراضية وضمان عمل التصميم على الشاشات المختلفة.
+=============================================================================
+*/
+.secret-panel-footer-hr {
+    border-top: 2px solid #e94560;
+    margin-top: 20px;
+}
+
+/*
+=============================================================================
+| 8. بطاقة النتائج المتحركة الجديدة
+| - أنماط لبطاقة نتائج ذات تصميم حديث وحركات دخول.
+=============================================================================
+*/
+.results-card-animated {
+    background: linear-gradient(145deg, var(--bg-gradient-mid), var(--bg-gradient-start));
+    border: 1px solid var(--surface-border);
+    border-radius: var(--border-radius-lg);
+    padding: var(--padding-md);
+    margin: 2rem 0;
+    box-shadow: var(--shadow-glow-primary);
+    animation: fadeInUp 0.7s ease-out forwards;
+    opacity: 0;
+}
+.results-card-animated .results-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--surface-border);
+}
+.results-card-animated .results-header .results-icon {
+    font-size: 2.5rem;
+    color: var(--color-accent);
+    animation: bounce 2s ease-in-out infinite;
+}
+.results-card-animated .results-header h3 {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+}
+.results-card-animated .results-body {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1.5rem;
+}
+.results-card-animated .metric-item {
+    background: var(--surface-color-alt);
+    padding: 1.2rem;
+    border-radius: var(--border-radius-md);
+    border-left: 5px solid;
+    transition: all 0.3s ease;
+    transform: perspective(1000px);
+}
+.results-card-animated .metric-item:hover {
+    transform: translateY(-5px) scale(1.03);
+    box-shadow: var(--shadow-md);
+}
+.results-card-animated .metric-label {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    font-size: 1rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+}
+.results-card-animated .metric-icon {
+    font-size: 1.5rem;
+    transition: transform 0.3s ease;
+}
+.results-card-animated .metric-item:hover .metric-icon {
+    transform: rotate(-10deg) scale(1.1);
+}
+.results-card-animated .metric-value {
+    font-size: 1.7rem;
+    font-weight: 700;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+/* ترميز لوني لعناصر المقاييس */
+.results-card-animated .metric-item.primary { border-color: var(--color-primary); }
+.results-card-animated .metric-item.primary .metric-value { color: var(--color-primary-light); }
+.results-card-animated .metric-item.secondary { border-color: var(--color-secondary); }
+.results-card-animated .metric-item.secondary .metric-value { color: var(--color-secondary-light); }
+.results-card-animated .metric-item.success { border-color: var(--color-success); }
+.results-card-animated .metric-item.success .metric-value { color: var(--color-success-text); }
+.results-card-animated .metric-item.warning { border-color: var(--color-warning); }
+.results-card-animated .metric-item.warning .metric-value { color: var(--color-warning-text); }
+.results-card-animated .metric-item.danger { border-color: var(--color-danger); }
+.results-card-animated .metric-item.danger .metric-value { color: var(--color-danger-text); }
+.results-card-animated .metric-item.total { border-color: var(--color-accent); }
+.results-card-animated .metric-item.total .metric-value { color: var(--color-accent-light); }
+.results-card-animated .metric-item.percentage { border-color: var(--color-info); }
+.results-card-animated .metric-item.percentage .metric-value { color: var(--color-info-text); }
+.results-card-animated .results-footer {
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--surface-border);
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    text-align: center;
+}
+.results-card-animated .results-footer p {
+    margin: 0.5rem 0;
+}
+
+/*
+=============================================================================
+| 9. | - أنماط لبطاقات نتائج الحاسبة الأساسية والثانوية.
+=============================================================================
+*/
+.results-card {
+    padding: 2.2rem 1.2rem 1.5rem 1.2rem;
+    border-radius: 18px;
+    background: linear-gradient(135deg, #232946 0%, #23272f 100%);
+    box-shadow: 0 4px 24px 0 rgba(0,0,0,0.13);
+    margin-bottom: 2.2rem;
+}
+.results-header {
+    display: flex;
+    align-items: center;
+    gap: 1.1rem;
+    margin-bottom: 1.1rem;
+    justify-content: center !important;
+    text-align: center !important;
+}
+.results-header-icon {
+    font-size: 2.8rem !important;
+    margin-left: 0.2rem;
+    color: #ffd700;
+    filter: drop-shadow(0 2px 8px #000a);
+}
+.results-title {
+    font-size: 2.7rem !important;
+    font-weight: 900;
+    color: #fff;
+    letter-spacing: 0.7px;
+    text-shadow: 0 2px 8px #000a;
+    margin-bottom: 1.1rem;
+    text-align: center !important;
+}
+.net-profit-badge-container, .net-loss-badge-container { text-align: center; margin: 1.5rem 0; }
+.net-profit-badge, .net-loss-badge { display: inline-block; padding: 1rem 2rem; border-radius: 50px; font-size: 1.2rem; font-weight: 700; text-shadow: 0 2px 5px rgba(0,0,0,0.3); position: relative; overflow: hidden; animation: badgeGlow 2s ease-in-out infinite; }
+.net-profit-badge { background: linear-gradient(135deg, #10b981, #059669); color: white; box-shadow: 0 5px 20px rgba(16,185,129,0.4); }
+.net-loss-badge { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; box-shadow: 0 5px 20px rgba(239,68,68,0.4); }
+.net-profit-badge::before, .net-loss-badge::before { content: ''; position: absolute; top: 0; left: -100%; width: 100%; height: 100%; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent); animation: badgeShimmer 3s infinite; }
+.metric-card { background: rgba(30,41,59,0.8); border: 1px solid rgba(59,130,246,0.2); border-radius: 15px; padding: 1.5rem; text-align: center; margin: 1rem 0; transition: all 0.3s ease; animation: metricFadeIn 0.6s ease-out; position: relative; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.metric-title { font-size: 1rem; margin-bottom: 0.5rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
+.metric-value { font-size: 1.8rem; font-weight: 700; color: #f8fafc; text-shadow: 0 2px 5px rgba(0,0,0,0.3); }
+.metric-card.blue { border-color: rgba(59,130,246,0.4); background: linear-gradient(135deg, rgba(59,130,246,0.1), rgba(59,130,246,0.05)); }
+.metric-card.blue .metric-title { color: #60a5fa; }
+.metric-card.blue .metric-value { color: #f8fafc; }
+.metric-card.green-dark { border-color: rgba(16,185,129,0.4); background: linear-gradient(135deg, rgba(16,185,129,0.1), rgba(16,185,129,0.05)); }
+.metric-card.green-dark .metric-title { color: #34d399; }
+.metric-card.green-dark .metric-value { color: #f8fafc; }
+.metric-card.yellow { border-color: rgba(245,158,11,0.4); background: linear-gradient(135deg, rgba(245,158,11,0.1), rgba(245,158,11,0.05)); }
+.metric-card.yellow .metric-title { color: #fbbf24; }
+.metric-card.yellow .metric-value { color: #f8fafc; }
+.metric-card.green-light { border-color: rgba(34,197,94,0.4); background: linear-gradient(135deg, rgba(34,197,94,0.1), rgba(34,197,94,0.05)); }
+.metric-card.green-light .metric-title { color: #4ade80; }
+.metric-card.green-light .metric-value { color: #f8fafc; }
+.metric-card.purple { border-color: rgba(139,92,246,0.4); background: linear-gradient(135deg, rgba(139,92,246,0.1), rgba(139,92,246,0.05)); }
+.metric-card.purple .metric-title { color: #a78bfa; }
+.metric-card.purple .metric-value { color: #f8fafc; }
+.metric-card.cyan { border-color: rgba(6,182,212,0.4); background: linear-gradient(135deg, rgba(6,182,212,0.1), rgba(6,182,212,0.05)); }
+.metric-card.cyan .metric-title { color: #22d3ee; }
+.metric-card.cyan .metric-value { color: #f8fafc; }
+.metric-card.red { border-color: rgba(239,68,68,0.4); background: linear-gradient(135deg, rgba(239,68,68,0.1), rgba(239,68,68,0.05)); }
+.metric-card.red .metric-title { color: #f87171; }
+.metric-card.red .metric-value { color: #f8fafc; }
+.metric-card.gold { border-color: rgba(255,215,0,0.4); background: linear-gradient(135deg, rgba(255,215,0,0.1), rgba(255,215,0,0.05)); }
+.metric-card.gold .metric-title { color: #ffd700; }
+.metric-card.gold .metric-value { color: #f8fafc; }
+
+/*
+=============================================================================
+| 10. تعديلات Streamlit والتصميم المتجاوب
+| - قواعد لضمان أن المكونات المخصصة تظهر بشكل صحيح داخل حاويات Streamlit.
+=============================================================================
+*/
+div[data-testid="stVerticalBlock"] .card,
+div[data-testid="stHorizontalBlock"] .card,
+div[data-testid="stExpander"] .card,
+div[data-testid="column"] .card,
+.main .block-container .card,
+div[data-testid="stAppViewContainer"] .card,
+div[data-testid="stVerticalBlock"] .results-card,
+div[data-testid="stHorizontalBlock"] .results-card,
+div[data-testid="stExpander"] .results-card,
+div[data-testid="column"] .results-card,
+.main .block-container .results-card,
+div[data-testid="stAppViewContainer"] .results-card,
+div[data-testid="stVerticalBlock"] .section-header,
+div[data-testid="stHorizontalBlock"] .section-header,
+div[data-testid="stExpander"] .section-header,
+div[data-testid="column"] .section-header,
+.main .block-container .section-header,
+div[data-testid="stAppViewContainer"] .section-header,
+div[data-testid="column"] .metric-card,
+div[data-testid="column"] .additional-notes {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    margin-top: 1.5rem !important;
+    margin-bottom: 1.5rem !important;
+    position: relative !important;
+    z-index: 1 !important;
+    box-sizing: border-box !important;
+}
+.card:empty,
+.card:not(:has(*)),
+.card:has(:only-child:empty) {
+    display: none !important;
+}
+
+/* --- التصميم المتجاوب (للشاشات الصغيرة) --- */
+@media (max-width: 768px) {
+    .centered-header h1 { font-size: 2rem; }
+    .centered-header p { font-size: 1rem; }
+    .card, .card--section-header, .card--results, .card--metric {
+        padding: var(--padding-sm);
+    }
+    .section-header .section-title { font-size: 1.5rem !important; }
+    .section-header .section-subtitle { font-size: 1rem !important; }
+    .tenor-card {
+        padding: 1rem 0.3rem;
+        min-width: 280px;
+        min-height: 90px;
+    }
+    .tenor-card-label { font-size: 0.85rem; }
+    .tenor-card-value { font-size: 1rem; }
+    .date-cards-container {
+        flex-direction: column;
+        align-items: center;
+    }
+}
+
+/* --- إمكانية الوصول والأداء --- */
+@media (prefers-reduced-motion: reduce) { /* تقليل الحركة للمستخدمين الذين يفضلون ذلك */
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+.animate-gpu { /* تحسين أداء الرسوم المتحركة باستخدام تسريع العتاد */
+    transform: translateZ(0);
+    will-change: transform;
+}
+
+/*
+=============================================================================
+| 11. أنماط لوحة التحكم الخاصة
+=============================================================================
+*/
+.admin-header {
+    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    padding: 10px;
+    border-radius: 5px;
+    margin: 10px 0;
+}
+.admin-header h3 {
+    color: white;
+    margin: 0;
+}
+.admin-session-timer {
+    text-align: center;
+    padding: 5px;
+    background: #0f172a;
+    border-radius: 5px;
+    margin: 10px 0;
+}
+.admin-metric {
+    display: inline-block;
+    margin: 5px;
+    padding: 8px;
+    background: #0f172a;
+    border-radius: 5px;
+}
+.admin-alert {
+    color: black;
+    padding: 10px;
+    border-radius: 5px;
+    margin: 10px 0;
+}
+.admin-alert--success {
+    background-color: #28a745;
+}
+.admin-alert--warning {
+    background-color: #ffc107;
+}
+.admin-alert--error {
+    background-color: #dc3545;
+}
+.admin-alert--info {
+    background-color: #17a2b8;
+}
+.admin-alert--default {
+    background-color: #6c757d;
+}
