@@ -1,18 +1,32 @@
-"""
-Data update script for the Treasury Bills Calculator application.
-سكريبت تحديث البيانات لتطبيق حاسبة أذون الخزانة.
-"""
-
-import os
-import sys
-import platform
-import logging
-import asyncio
 import argparse
-from datetime import datetime, timedelta, time
-import requests
+import asyncio
+import contextlib
 import hashlib
 import json
+import logging
+import os
+import platform
+import sys
+from datetime import datetime, timedelta, time
+
+import requests
+
+
+# --- suppress_streamlit_warnings context manager ---
+@contextlib.contextmanager
+def suppress_streamlit_warnings():
+    """كتم مخرجات Streamlit عند التشغيل خارج بيئة Streamlit"""
+    if not os.environ.get("STREAMLIT_RUN", False):
+        with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(
+            devnull
+        ), contextlib.redirect_stderr(devnull):
+            yield
+    else:
+        yield
+
+
+# ----------------------------------------------------
+
 
 # Add project path to support running from cron or docker directly
 sys.path.append(os.getcwd())
@@ -574,7 +588,8 @@ if __name__ == "__main__":
     print(f"🔧 معاملات التشغيل: force_refresh={args.force_refresh}")
 
     try:
-        run_main_safely(force_refresh=args.force_refresh)
+        with suppress_streamlit_warnings():
+            run_main_safely(force_refresh=args.force_refresh)
         print("✅ تم تشغيل السكريبت بنجاح")
         sys.exit(0)
     except KeyboardInterrupt:
