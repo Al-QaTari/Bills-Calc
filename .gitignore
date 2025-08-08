@@ -7,9 +7,7 @@
 .env
 
 # Local or temporary databases
-cbe_historical_data.db
 *.sqlite3
-*.db
 
 # Python cache directories
 __pycache__/
