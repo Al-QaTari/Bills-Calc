@@ -54,12 +54,22 @@ jobs:
           else
             echo "✅ POSTGRES_URI is set."
           fi
+
       - name: Run data update script
         run: python update_data.py
 
-      # ✅ تم إضافة هذه الخطوة مرة أخرى
-      - name: Commit and push changes
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "Update CBE historical data [BOT]"
-          file_pattern: data/cbe_historical_data.db # ✅ تم تعديل مسار الملف
+      # ✅ هذه الخطوة الجديدة ستساعدنا على التأكد من وجود الملف
+      - name: Verify file exists and commit
+        run: |
+          if [ -f "data/cbe_historical_data.db" ]; then
+            echo "✅ The file data/cbe_historical_data.db exists. Proceeding with commit."
+            # تشغيل git-auto-commit-action فقط إذا كان الملف موجودًا
+            # هذه الطريقة تتجنب خطأ "Working tree clean"
+            git config --global user.name "GitHub Actions"
+            git config --global user.email "github-actions@github.com"
+            git add data/cbe_historical_data.db
+            git commit -m "Update CBE historical data [BOT]" || echo "No changes to commit"
+            git push origin main # تأكد من أن 'main' هو اسم الفرع الرئيسي
+          else
+            echo "❌ The file data/cbe_historical_data.db was not found. Nothing to commit."
+          fi
