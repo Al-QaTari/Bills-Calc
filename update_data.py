@@ -14,7 +14,7 @@ import sys
 from datetime import datetime, timedelta, time
 from html import escape
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 import requests
 
@@ -54,6 +54,7 @@ def suppress_streamlit_warnings():
 SENTRY_AVAILABLE = False
 DOTENV_AVAILABLE = False
 CUSTOM_MODULES_AVAILABLE = False
+DB_MANAGERS = {}
 
 try:
     import importlib.util
@@ -77,10 +78,12 @@ except Exception:
 CbeScraper = None
 fetch_and_update_data_async = None
 PostgresDBManager = None
+SQLiteDBManager = None
 
 try:
     from cbe_scraper import CbeScraper, fetch_and_update_data_async  # type: ignore
     from postgres_manager import PostgresDBManager  # type: ignore
+    from db_manager import SQLiteDBManager  # type: ignore
 
     CUSTOM_MODULES_AVAILABLE = True
 except Exception as e:
@@ -294,7 +297,7 @@ def _send_alert(message: str, severity: str = "info"):
                 "attachments": [
                     {
                         "color": color,
-                        "title": "تحديث بيانات سندات الخزينة",
+                        "title": "تحديث بيانات سندات الخزانة",
                         "text": message,
                         "footer": "نظام تحديث البيانات التلقائي",
                         "ts": int(datetime.now().timestamp()),
@@ -366,18 +369,26 @@ def calculate_next_update_time() -> datetime:
 
     # خلال ساعات السوق
     try:
-        if CUSTOM_MODULES_AVAILABLE and PostgresDBManager is not None:
-            db_adapter = PostgresDBManager()
+        # ✅ تم التعديل: اختيار أول مدير قاعدة بيانات متوفر للتحقق
+        db_adapter = DB_MANAGERS.get("primary") or DB_MANAGERS.get("fallback")
+        if (
+            db_adapter
+            and CUSTOM_MODULES_AVAILABLE
+            and hasattr(db_adapter, "get_latest_session_date")
+        ):
             latest_date = db_adapter.get_latest_session_date()
             if latest_date:
                 # افترض latest_date في شكل "DD/MM/YYYY"
                 try:
                     latest_dt = datetime.strptime(latest_date, "%d/%m/%Y")
                     if latest_dt.date() == today:
-                        update_count = db_adapter.get_daily_update_count()
-                        base_interval = 60
-                        interval = max(15, base_interval - (update_count * 10))
-                        return now + timedelta(minutes=interval)
+                        if hasattr(db_adapter, "get_daily_update_count"):
+                            update_count = db_adapter.get_daily_update_count()
+                            base_interval = 60
+                            interval = max(15, base_interval - (update_count * 10))
+                            return now + timedelta(minutes=interval)
+                        else:
+                            return now + timedelta(minutes=30)
                     else:
                         return now
                 except Exception:
@@ -443,8 +454,13 @@ def _check_required_env_vars():
 # ---------------------------
 # تهيئة الخدمات (Sentry + DB adapter)
 # ---------------------------
-def _initialize_services():
-    """تهيئة Sentry (اختياري) وإرجاع db_adapter مناسب (Postgres أو SQLite)"""
+def _initialize_services() -> List[Any]:
+    """
+    ✅ تم التعديل: تهيئة مديري قواعد البيانات.
+    - يحاول تهيئة PostgreSQL كـ 'primary'
+    - يحاول تهيئة SQLite كـ 'fallback'
+    - يُرجع قائمة بالمديرين الذين تم تهيئتهم بنجاح.
+    """
     # Sentry
     sentry_dsn = os.environ.get("SENTRY_DSN")
     sentry_env = os.environ.get("SENTRY_ENVIRONMENT", "production")
@@ -457,20 +473,42 @@ def _initialize_services():
         except Exception as e:
             logger.error(f"❌ فشل تهيئة Sentry: {e}", exc_info=True)
 
-    # اختيار مدير قاعدة البيانات
-    if os.environ.get("POSTGRES_URI") and PostgresDBManager is not None:
-        db_adapter = PostgresDBManager()
-        logger.info("📊 استخدام قاعدة البيانات PostgreSQL")
-    else:
-        try:
-            from db_manager import SQLiteDBManager  # type: ignore
+    adapters = []
 
-            db_adapter = SQLiteDBManager()
-            logger.info("📊 استخدام قاعدة البيانات SQLite المحلية")
+    # محاولة تهيئة PostgreSQL كقاعدة بيانات رئيسية
+    if os.environ.get("POSTGRES_URI") and PostgresDBManager is not None:
+        try:
+            postgres_adapter = PostgresDBManager()
+            adapters.append(postgres_adapter)
+            logger.info("📊 استخدام قاعدة البيانات PostgreSQL (رئيسي)")
         except Exception as e:
-            logger.error(f"❌ لم يتم العثور على SQLiteDBManager: {e}", exc_info=True)
-            raise RuntimeError("لا يمكن العثور على مدير قاعدة بيانات مناسب")
-    return db_adapter
+            logger.warning(f"❌ فشل تهيئة PostgreSQL: {e}", exc_info=True)
+
+    # محاولة تهيئة SQLite كخيار احتياطي (مُتاح دائمًا)
+    if SQLiteDBManager is not None:
+        try:
+            sqlite_adapter = SQLiteDBManager()
+            adapters.append(sqlite_adapter)
+            logger.info("📊 استخدام قاعدة البيانات SQLite المحلية (احتياطي)")
+        except Exception as e:
+            logger.error(f"❌ فشل تهيئة SQLiteDBManager: {e}", exc_info=True)
+
+    if not adapters:
+        raise RuntimeError("لا يمكن العثور على مدير قاعدة بيانات مناسب")
+
+    # قم بتعيين المديرين في القاموس العام للوصول إليها في calculate_next_update_time
+    DB_MANAGERS["primary"] = (
+        adapters[0] if adapters and isinstance(adapters[0], PostgresDBManager) else None
+    )
+    DB_MANAGERS["fallback"] = (
+        adapters[0]
+        if adapters
+        and isinstance(adapters[0], SQLiteDBManager)
+        and not DB_MANAGERS["primary"]
+        else (adapters[1] if len(adapters) > 1 else None)
+    )
+
+    return adapters
 
 
 # ---------------------------
@@ -575,6 +613,8 @@ def _check_and_send_telegram_alerts_blocking(db_adapter):
     try:
         manager = AlertManager()
         threshold = float(os.environ.get("ALERTS_THRESHOLD", "0.5"))
+
+        # ✅ تم التعديل: استخدام db_adapter الذي تم تمريره
         alerts = db_adapter.check_yield_changes(threshold_percent=threshold)
 
         if not alerts:
@@ -618,19 +658,47 @@ async def main(force_refresh: bool):
 
     try:
         _check_required_env_vars()
-        db_adapter = _initialize_services()
+        # ✅ تم التعديل: تهيئة مديري قواعد البيانات
+        adapters = _initialize_services()
         scraper_adapter = CbeScraper()
 
         logger.info(
             f"{'🔄' if force_refresh else '⏳'} جاري جلب البيانات {'مع تجاهل الكاش' if force_refresh else 'من الكاش'}..."
         )
 
-        updated = await safe_fetch_and_update(
-            scraper_adapter, db_adapter, force_refresh
-        )
+        updated = None
+        save_success = False
 
-        # نفذ المعالجة المتزامنة في ثريد حتى لا نحجب الـ event loop
-        await asyncio.to_thread(_process_update_result_blocking, updated, db_adapter)
+        # ✅ تم التعديل هنا: منطق الحفظ في كل قواعد البيانات
+        for adapter in adapters:
+            try:
+                updated_result = await safe_fetch_and_update(
+                    scraper_adapter, adapter, force_refresh
+                )
+                logger.info(f"✅ تم تحديث البيانات بنجاح في {type(adapter).__name__}.")
+                if updated_result is True:
+                    updated = True
+                # ✅ تم التعديل هنا: يجب تعيين updated على False إذا كانت البيانات مكررة
+                elif updated_result is False:
+                    updated = False
+                save_success = True
+            except Exception as e:
+                logger.error(
+                    f"❌ فشل الحفظ في {type(adapter).__name__}: {e}", exc_info=True
+                )
+
+        if updated:
+            # ✅ تم التعديل: نمرر أول adapter متاح للمراجعة
+            await asyncio.to_thread(
+                _process_update_result_blocking, updated, adapters[0]
+            )
+        elif not save_success:
+            raise RuntimeError("❌ فشل الحفظ في جميع قواعد البيانات المتاحة.")
+        else:
+            # إذا لم يتم التحديث فعليًا (البيانات مكررة)، نستخدم أي محول متاح للتحقق
+            await asyncio.to_thread(
+                _process_update_result_blocking, updated, adapters[0]
+            )
 
     except asyncio.TimeoutError as e:
         logger.error(f"⏰ {str(e)}")
