@@ -10,15 +10,13 @@ jobs:
   scrape:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # تبقى كما هي في حال أردت إضافة أي commit مستقبلاً
+      contents: write # هذا ضروري للسماح للورك فلو بالكتابة على المستودع
 
-    # --- بداية التعديل: إضافة كل الأسرار المطلوبة ---
     env:
       SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
       POSTGRES_URI: ${{ secrets.POSTGRES_URI }}
       AIVEN_REDIS_URI: ${{ secrets.AIVEN_REDIS_URI }}
       SENTRY_ENVIRONMENT: ${{ secrets.SENTRY_ENVIRONMENT }}
-    # --- نهاية التعديل ---
 
     steps:
       - name: Check out repository
@@ -29,7 +27,6 @@ jobs:
         with:
           python-version: '3.11'
 
-      # --- بداية التعديل: تثبيت الاعتماديات والمتصفح ---
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -37,7 +34,7 @@ jobs:
       
       - name: Install Playwright Browsers
         run: playwright install chromium --with-deps
-      # --- نهاية التعديل ---
+
       - name: Verify Environment Variables
         run: |
           echo "Verifying required environment variables..."
@@ -58,18 +55,8 @@ jobs:
       - name: Run data update script
         run: python update_data.py
 
-      # ✅ هذه الخطوة الجديدة ستساعدنا على التأكد من وجود الملف
-      - name: Verify file exists and commit
-        run: |
-          if [ -f "data/cbe_historical_data.db" ]; then
-            echo "✅ The file data/cbe_historical_data.db exists. Proceeding with commit."
-            # تشغيل git-auto-commit-action فقط إذا كان الملف موجودًا
-            # هذه الطريقة تتجنب خطأ "Working tree clean"
-            git config --global user.name "GitHub Actions"
-            git config --global user.email "github-actions@github.com"
-            git add data/cbe_historical_data.db
-            git commit -m "Update CBE historical data [BOT]" || echo "No changes to commit"
-            git push origin main # تأكد من أن 'main' هو اسم الفرع الرئيسي
-          else
-            echo "❌ The file data/cbe_historical_data.db was not found. Nothing to commit."
-          fi
+      - name: Commit and push changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Update CBE historical data [BOT]"
+          file_pattern: data/cbe_historical_data.db
