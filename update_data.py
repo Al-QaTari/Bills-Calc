@@ -1,3 +1,7 @@
+"""
+update_data.py
+"""
+
 import argparse
 import asyncio
 import contextlib
@@ -8,73 +12,91 @@ import os
 import platform
 import sys
 from datetime import datetime, timedelta, time
+from html import escape
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 import requests
 
+# ---------------------------
+# إعداد مسار المشروع بأمان
+# ---------------------------
+# أدخل مسار الملف الحالي (دليل المشروع) في بداية sys.path لضمان استيراد الملفات المحلية أولًا
+PROJECT_DIR = Path(__file__).resolve().parent
+if str(PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(PROJECT_DIR))
 
-# --- suppress_streamlit_warnings context manager ---
+
+# ---------------------------
+# context manager لكتم Streamlit
+# ---------------------------
 @contextlib.contextmanager
 def suppress_streamlit_warnings():
-    """كتم مخرجات Streamlit عند التشغيل خارج بيئة Streamlit"""
-    if not os.environ.get("STREAMLIT_RUN", False):
+    """
+    كتم مخرجات Streamlit عند التشغيل خارج بيئة Streamlit.
+    افترضنا أن المتغير STREAMLIT_RUN يُعيّن إلى "true" عندما يكون داخل Streamlit.
+    """
+    run_flag = os.environ.get("STREAMLIT_RUN", "").lower()
+    if run_flag == "true":
+        # داخل Streamlit — لا تقم بالصّمت
+        yield
+    else:
+        # خارجه — كتم المخرجات
         with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(
             devnull
         ), contextlib.redirect_stderr(devnull):
             yield
-    else:
-        yield
 
 
-# ----------------------------------------------------
+# ---------------------------
+# استيرادات مع تحقّق ومرونة
+# ---------------------------
+SENTRY_AVAILABLE = False
+DOTENV_AVAILABLE = False
+CUSTOM_MODULES_AVAILABLE = False
 
-
-# Add project path to support running from cron or docker directly
-sys.path.append(os.getcwd())
-
-# استيرادات مع معالجة الأخطاء
 try:
     import importlib.util
 
     if importlib.util.find_spec("sentry_sdk") is not None:
-        import sentry_sdk
+        import sentry_sdk  # type: ignore
 
         SENTRY_AVAILABLE = True
-    else:
-        SENTRY_AVAILABLE = False
-except ImportError:
-    print("⚠️ تحذير: sentry-sdk غير مثبت")
+except Exception:
+    # سنسجّل التحذير لاحقًا عبر logger
     SENTRY_AVAILABLE = False
 
 try:
-    from dotenv import load_dotenv
+    from dotenv import load_dotenv  # type: ignore
 
     DOTENV_AVAILABLE = True
-except ImportError:
-    print("⚠️ تحذير: python-dotenv غير مثبت")
+except Exception:
     DOTENV_AVAILABLE = False
 
+# حاول استيراد الوحدات المخصصة (قد تكون غير موجودة في بيئة التطوير المحلية)
+CbeScraper = None
+fetch_and_update_data_async = None
+PostgresDBManager = None
+
 try:
-    from cbe_scraper import CbeScraper, fetch_and_update_data_async
-    from postgres_manager import PostgresDBManager
-    from utils import setup_logging
+    from cbe_scraper import CbeScraper, fetch_and_update_data_async  # type: ignore
+    from postgres_manager import PostgresDBManager  # type: ignore
 
     CUSTOM_MODULES_AVAILABLE = True
-except ImportError as e:
-    print(f"❌ خطأ في استيراد المكتبات المخصصة: {e}")
-    print("تأكد من أن جميع الملفات المطلوبة موجودة في نفس المجلد:")
-    print("- cbe_scraper.py")
-    print("- postgres_manager.py")
-    print("- utils.py")
-    print("- secret_admin_panel.py")
+except Exception as e:
+    # سنعرض رسالة عند التشغيل إذا كانت هذه الوحدات مطلوبة
     CUSTOM_MODULES_AVAILABLE = False
+    missing_custom_modules_error = e  # للتشخيص لاحقًا
 
-# --- الكود المضاف لإخفاء التحذيرات ---
-# ✅ FIX: تم إضافة هذا الجزء لإخفاء تحذيرات Streamlit غير الضرورية
-# عند تشغيل الاسكريبت بشكل مستقل للحصول على مخرجات نظيفة.
+# ---------------------------
+# إعداد logging
+# ---------------------------
+# حاول استخدام setup_logging من utils إذا متوفر، وإلا استخدم basicConfig
 try:
-    from utils import setup_logging
+    from utils import setup_logging  # type: ignore
 
     setup_logging(level=logging.INFO)
+    # خفف مستوى تحذيرات Streamlit لو متوفر
     logging.getLogger("streamlit").setLevel(logging.ERROR)
     logging.getLogger("streamlit.runtime.caching.cache_data_api").setLevel(
         logging.ERROR
@@ -82,46 +104,74 @@ try:
     logging.getLogger(
         "streamlit.runtime.scriptrunner_utils.script_run_context"
     ).setLevel(logging.ERROR)
-except (ImportError, Exception):
-    # Fallback basic logging if setup_logging fails
+except Exception:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
-# ------------------------------------
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------
+# ثوابت وإعدادات عامة
+# ---------------------------
 _FAILURE_COUNT = 0
 _MAX_FAILURES = 5
 
-# ==============================================================================
-#  بداية الكود المضاف: أدوات إدارة وإرسال تنبيهات تليجرام
-# ==============================================================================
+ALERT_CACHE_FILE = PROJECT_DIR / "sent_alerts_cache.json"
+CACHE_DURATION = 24  # ساعات
+# session واحد لإعادة استخدام الاتصالات
+HTTP_SESSION = requests.Session()
+HTTP_SESSION.headers.update({"User-Agent": "cbe-updater/1.0"})
 
-ALERT_CACHE_FILE = "sent_alerts_cache.json"
-CACHE_DURATION = 24  # عمر التنبيه في الكاش بالساعات
 
-
+# ---------------------------
+# أدوات إدارة كاش التنبيهات
+# ---------------------------
 class AlertManager:
-    def __init__(self):
-        self.cache = self._load_cache()
+    def __init__(self, cache_file: Path = ALERT_CACHE_FILE):
+        self.cache_file = cache_file
+        self._inproc_lock = (
+            asyncio.Lock()
+        )  # لحماية الكتابة داخل نفس العملية عند الاستخدام async
+        self.cache: Dict[str, Any] = self._load_cache()
 
-    def _load_cache(self) -> dict:
+    def _load_cache(self) -> Dict[str, Any]:
         try:
-            if not os.path.exists(ALERT_CACHE_FILE):
+            if not self.cache_file.exists():
                 return {"alerts": {}}
-            with open(ALERT_CACHE_FILE, "r", encoding="utf-8") as f:
+            with self.cache_file.open("r", encoding="utf-8") as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError):
+        except (json.JSONDecodeError, IOError) as e:
+            logger.warning(
+                f"تحذير: فشل قراءة كاش التنبيهات ({e}) — سيتم إعادة إنشاء الملف."
+            )
             return {"alerts": {}}
 
-    def _save_cache(self):
-        with open(ALERT_CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(self.cache, f, ensure_ascii=False, indent=2)
+    def _save_cache_atomic(self):
+        """حفظ آمن: اكتب في ملف مؤقت ثم استبدل (atomic replace)"""
+        try:
+            tmp = self.cache_file.with_suffix(".tmp")
+            with tmp.open("w", encoding="utf-8") as f:
+                json.dump(self.cache, f, ensure_ascii=False, indent=2)
+            tmp.replace(self.cache_file)
+        except Exception as e:
+            logger.error(f"فشل حفظ كاش التنبيهات: {e}")
 
-    def _generate_hash(self, alert: dict) -> str:
-        key = f"{alert.get('tenor')}_{alert.get('latest_date')}_{alert.get('previous_date')}_{alert.get('change_percent', 0):.2f}"
+    async def save_cache(self):
+        # حماية داخلية للكتابة إذا استُدعيت من سياق async متعدد
+        async with self._inproc_lock:
+            await asyncio.to_thread(self._save_cache_atomic)
+
+    def _generate_hash(self, alert: Dict[str, Any]) -> str:
+        try:
+            cp = float(alert.get("change_percent") or 0)
+        except (ValueError, TypeError):
+            cp = 0.0
+        tenor = str(alert.get("tenor") or "")
+        ld = str(alert.get("latest_date") or "")
+        pd = str(alert.get("previous_date") or "")
+        key = f"{tenor}_{ld}_{pd}_{cp:.2f}"
         return hashlib.md5(key.encode("utf-8")).hexdigest()
 
     def _cleanup_old_entries(self):
@@ -129,107 +179,143 @@ class AlertManager:
         cleaned_alerts = {}
         for alert_hash, data in self.cache.get("alerts", {}).items():
             try:
-                if datetime.fromisoformat(data["timestamp"]) > cutoff_time:
+                ts = data.get("timestamp")
+                if not ts:
+                    continue
+                if datetime.fromisoformat(ts) > cutoff_time:
                     cleaned_alerts[alert_hash] = data
             except (KeyError, ValueError):
                 continue
         self.cache["alerts"] = cleaned_alerts
 
-    def is_duplicate(self, alert: dict) -> bool:
+    def is_duplicate(self, alert: Dict[str, Any]) -> bool:
         self._cleanup_old_entries()
         return self._generate_hash(alert) in self.cache.get("alerts", {})
 
-    def mark_sent(self, alert: dict):
+    def mark_sent(self, alert: Dict[str, Any]):
         alert_hash = self._generate_hash(alert)
-        self.cache["alerts"][alert_hash] = {"timestamp": datetime.now().isoformat()}
-        self._save_cache()
+        self.cache.setdefault("alerts", {})[alert_hash] = {
+            "timestamp": datetime.now().isoformat()
+        }
+        # كتابة متزامنة بسيطة (لا تنتظر هنا)
+        try:
+            self._save_cache_atomic()
+        except Exception as e:
+            logger.error(f"خطأ أثناء وسم التنبيه كمرسَل: {e}")
 
 
-def _generate_telegram_message(alert: dict) -> str:
-    emoji = "📈" if alert.get("direction") == "زيادة" else "📉"
+# ---------------------------
+# توليد رسالة تليجرام (HTML-escaped)
+# ---------------------------
+def _generate_telegram_message(alert: Dict[str, Any]) -> str:
+    emoji = "📈" if str(alert.get("direction") or "").strip() == "زيادة" else "📉"
+    tenor = escape(str(alert.get("tenor") or ""))
+    try:
+        latest = float(alert.get("latest_yield") or 0.0)
+    except (ValueError, TypeError):
+        latest = 0.0
+    try:
+        prev = float(alert.get("previous_yield") or 0.0)
+    except (ValueError, TypeError):
+        prev = 0.0
+    direction = escape(str(alert.get("direction") or ""))
+    try:
+        change = abs(float(alert.get("change_percent") or 0.0))
+    except (ValueError, TypeError):
+        change = 0.0
+
     return (
-        f"{emoji} *تنبيه تغيير العائد*\n\n"
-        f"*الأجل:* {alert.get('tenor')} يوم\n"
-        f"*العائد الحالي:* {alert.get('latest_yield', 0):.3f}% | *السابق:* {alert.get('previous_yield', 0):.3f}%\n"
-        f"*{alert.get('direction')}:* {abs(alert.get('change_percent', 0)):.3f}%"
+        f"{emoji} <b>تنبيه تغيير العائد</b>\n\n"
+        f"<b>الأجل:</b> {tenor} يوم\n"
+        f"<b>العائد الحالي:</b> {latest:.3f}% | <b>السابق:</b> {prev:.3f}%\n"
+        f"<b>{direction}:</b> {change:.3f}%"
     )
 
 
-def _send_telegram_alert(alert: dict) -> bool:
+# ---------------------------
+# إرسال تنبيه تليجرام (مزامن) — يمكن استدعاؤه عبر asyncio.to_thread
+# ---------------------------
+def _send_telegram_alert_sync(alert: Dict[str, Any]) -> bool:
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
-        logger.error("إعدادات تليجرام (token or chat_id) غير موجودة.")
+        logger.error(
+            "إعدادات تليجرام (TELEGRAM_BOT_TOKEN أو TELEGRAM_CHAT_ID) غير موجودة."
+        )
         return False
 
     message = _generate_telegram_message(alert)
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
+    payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
 
     try:
-        response = requests.post(url, json=payload, timeout=10)
+        # استخدم session مُعَدّ مسبقًا
+        response = HTTP_SESSION.post(url, json=payload, timeout=10)
         if response.ok:
             logger.info(f"✅ تم إرسال تنبيه تليجرام بنجاح للأجل: {alert.get('tenor')}")
             return True
         else:
-            logger.error(f"❌ فشل إرسال تنبيه تليجرام: {response.text}")
+            logger.error(
+                f"❌ فشل إرسال تنبيه تليجرام: {response.status_code} - {response.text}"
+            )
             return False
     except requests.RequestException as e:
         logger.error(f"❌ خطأ في الاتصال بتليجرام: {e}")
         return False
 
 
-# ==============================================================================
-#  نهاية الكود المضاف
-# ==============================================================================
+# نغلف دالة async لاستدعاء النسخة المتزامنة بدون حجب event loop
+async def _send_telegram_alert(alert: Dict[str, Any]) -> bool:
+    return await asyncio.to_thread(_send_telegram_alert_sync, alert)
 
 
+# ---------------------------
+# إرسال تنبيهات عامة (Sentry, Slack, Email placeholder)
+# ---------------------------
 def _send_alert(message: str, severity: str = "info"):
     """إرسال التنبيهات عبر Sentry و Slack"""
-    # إرسال إلى Sentry إذا كان متوفراً
-    if SENTRY_AVAILABLE:
+    # Sentry
+    if SENTRY_AVAILABLE and os.environ.get("SENTRY_DSN"):
         try:
             sentry_sdk.capture_message(message, level=severity)
         except Exception as e:
-            logger.error(f"خطأ في إرسال Sentry: {e}")
+            logger.error(f"خطأ في إرسال Sentry: {e}", exc_info=True)
 
-    # إرسال إلى Slack إذا كان webhook متوفراً
+    # Slack webhook (synchronous, استخدم session)
     slack_webhook = os.environ.get("SLACK_WEBHOOK_URL")
     if slack_webhook:
         try:
             color = (
                 "#36a64f"
                 if severity == "info"
-                else "#FFCC00" if severity == "warning" else "#FF0000"
+                else ("#FFCC00" if severity == "warning" else "#FF0000")
             )
-            response = requests.post(
-                slack_webhook,
-                json={
-                    "attachments": [
-                        {
-                            "color": color,
-                            "title": "تحديث بيانات سندات الخزينة",
-                            "text": message,
-                            "footer": "نظام تحديث البيانات التلقائي",
-                            "ts": int(datetime.now().timestamp()),
-                        }
-                    ]
-                },
-                timeout=10,
-            )
-            if response.status_code != 200:
-                logger.error(
-                    f"فشل إرسال تنبيه Slack: {response.status_code} - {response.text}"
-                )
+            payload = {
+                "attachments": [
+                    {
+                        "color": color,
+                        "title": "تحديث بيانات سندات الخزينة",
+                        "text": message,
+                        "footer": "نظام تحديث البيانات التلقائي",
+                        "ts": int(datetime.now().timestamp()),
+                    }
+                ]
+            }
+            resp = HTTP_SESSION.post(slack_webhook, json=payload, timeout=10)
+            if resp.status_code != 200:
+                logger.error(f"فشل إرسال تنبيه Slack: {resp.status_code} - {resp.text}")
         except Exception as e:
-            logger.error(f"فشل إرسال تنبيه Slack: {str(e)}")
+            logger.error(f"فشل إرسال تنبيه Slack: {e}", exc_info=True)
 
-    if os.environ.get("EMAIL_ALERTS") == "true":
-        logger.info("📧 إرسال الإيميل مفعل (لكن غير منفذ بعد)")
+    # placeholder لإيميلات التنبيه (لم يُنفذ بعد)
+    if os.environ.get("EMAIL_ALERTS", "").lower() == "true":
+        logger.info("📧 إرسال الإيميل مفعل (لكن لم يُنفذ بعد).")
 
 
+# ---------------------------
+# عداد الأخطاء
+# ---------------------------
 def _increment_failure_count() -> int:
-    """زيادة عداد الفشل"""
     global _FAILURE_COUNT
     _FAILURE_COUNT += 1
     logger.warning(f"⚠️ فشل في جلب البيانات (المحاولة {_FAILURE_COUNT}/{_MAX_FAILURES})")
@@ -237,22 +323,35 @@ def _increment_failure_count() -> int:
 
 
 def _reset_failure_count():
-    """إعادة تعيين عداد الفشل"""
     global _FAILURE_COUNT
     _FAILURE_COUNT = 0
     logger.info("🔄 تم إعادة تعيين عداد الفشل بعد التحديث الناجح")
 
 
+# ---------------------------
+# حساب وقت التحديث التالي (منقح)
+# ---------------------------
+def _next_business_date(start_date: datetime.date) -> datetime.date:
+    """
+    إعادة أول يوم عمل (الافتراض: يوم العمل هو Sun-Thu => أيام الأسبوع 0..6: Mon=0)
+    ولكن الكود السابق اعتبر الجمعة والسبت عطلة (4 و5) — نترك نفس الفرضية:
+    هنا نعتبر أيام العطلة هي 4 (Friday) و5 (Saturday).
+    """
+    candidate = start_date
+    while candidate.weekday() in [4, 5]:
+        candidate += timedelta(days=1)
+    return candidate
+
+
 def calculate_next_update_time() -> datetime:
-    """حساب وقت التحديث التالي"""
+    """حساب وقت التحديث التالي — نسخة مُصححة وأكثر ثباتًا"""
     now = datetime.now()
     today = now.date()
-    is_business_day = now.weekday() not in [4, 5]
 
-    if not is_business_day:
-        days_ahead = 7 - now.weekday() if now.weekday() == 5 else 6 - now.weekday()
-        next_business_day = today + timedelta(days=days_ahead)
-        return datetime.combine(next_business_day, time(9, 0))
+    # إذا اليوم ليس يوم عمل (Fri/Sat) فارجع أول يوم عمل لاحق في الساعة 09:00
+    if today.weekday() in [4, 5]:
+        next_bd = _next_business_date(today + timedelta(days=1))
+        return datetime.combine(next_bd, time(9, 0))
 
     market_open = time(9, 0)
     market_close = time(15, 0)
@@ -260,35 +359,54 @@ def calculate_next_update_time() -> datetime:
     if now.time() < market_open:
         return datetime.combine(today, market_open)
     elif now.time() >= market_close:
+        # حدد أول يوم عمل التالي
         next_day = today + timedelta(days=1)
-        while next_day.weekday() in [4, 5]:
-            next_day += timedelta(days=1)
-        return datetime.combine(next_day, market_open)
+        next_bd = _next_business_date(next_day)
+        return datetime.combine(next_bd, market_open)
 
+    # خلال ساعات السوق
     try:
-        if CUSTOM_MODULES_AVAILABLE:
+        if CUSTOM_MODULES_AVAILABLE and PostgresDBManager is not None:
             db_adapter = PostgresDBManager()
             latest_date = db_adapter.get_latest_session_date()
-
             if latest_date:
-                if latest_date == now.strftime("%d/%m/%Y"):
-                    update_count = db_adapter.get_daily_update_count()
-                    base_interval = 60
-                    interval = max(15, base_interval - (update_count * 10))
-                    return now + timedelta(minutes=interval)
-                else:
-                    return now
+                # افترض latest_date في شكل "DD/MM/YYYY"
+                try:
+                    latest_dt = datetime.strptime(latest_date, "%d/%m/%Y")
+                    if latest_dt.date() == today:
+                        update_count = db_adapter.get_daily_update_count()
+                        base_interval = 60
+                        interval = max(15, base_interval - (update_count * 10))
+                        return now + timedelta(minutes=interval)
+                    else:
+                        return now
+                except Exception:
+                    # لو فشل التحويل نرجع بعد 30 دقيقة
+                    return now + timedelta(minutes=30)
             else:
                 return now + timedelta(minutes=30)
     except Exception as e:
-        logger.error(f"خطأ في حساب وقت التحديث التالي: {e}")
+        logger.error(f"خطأ في حساب وقت التحديث التالي (DB): {e}", exc_info=True)
         return now + timedelta(minutes=30)
 
+    return now + timedelta(minutes=30)
 
-async def safe_fetch_and_update(scraper_adapter, db_adapter, force_refresh=False):
+
+# ---------------------------
+# دالة جلب وتحديث البيانات (آمنة)
+# ---------------------------
+async def safe_fetch_and_update(
+    scraper_adapter, db_adapter, force_refresh: bool = False
+):
     """
-    دالة لجلب وتحديث البيانات مع معالجة الأخطاء.
+    دالة async لجلب وتحديث البيانات مع timeout ومعالجة الأخطاء.
+    تفترض أن fetch_and_update_data_async موجود ومعمول بشكل async.
     """
+    if fetch_and_update_data_async is None:
+        raise RuntimeError(
+            "fetch_and_update_data_async غير متوفر — تأكد من وجود cbe_scraper.py"
+        )
+
     try:
         result = await asyncio.wait_for(
             fetch_and_update_data_async(
@@ -300,86 +418,101 @@ async def safe_fetch_and_update(scraper_adapter, db_adapter, force_refresh=False
             timeout=180.0,
         )
         return result
-
     except asyncio.TimeoutError:
         raise asyncio.TimeoutError("تجاوز الوقت المسموح لجلب البيانات (3 دقائق)")
     except Exception as e:
-        logger.error(f"خطأ في جلب البيانات: {e}")
+        logger.error(f"خطأ في جلب البيانات: {e}", exc_info=True)
         raise
 
 
+# ---------------------------
+# التحقق من متغيرات البيئة (مرن)
+# ---------------------------
 def _check_required_env_vars():
-    """التحقق من وجود متغيرات البيئة المطلوبة"""
+    """
+    لا نفرض POSTGRES_URI لأن لدينا SQLite كفشل احتياطي.
+    إن وُجد SENTRY_DSN فمن المستحسن وضع SENTRY_ENVIRONMENT لكن لا نجبر عليه.
+    """
     sentry_dsn = os.environ.get("SENTRY_DSN")
-    required_env_vars = ["POSTGRES_URI"]
-    if sentry_dsn:
-        required_env_vars.append("SENTRY_ENVIRONMENT")
-
-    missing_vars = [var for var in required_env_vars if not os.environ.get(var)]
-    if missing_vars:
-        raise RuntimeError(
-            f"❌ المتغيرات البيئية المطلوبة مفقودة: {', '.join(missing_vars)}"
+    if sentry_dsn and not os.environ.get("SENTRY_ENVIRONMENT"):
+        logger.warning(
+            "SENTRY_DSN موجود لكن SENTRY_ENVIRONMENT غير محدد — سيتم استخدام 'production' افتراضيًا."
         )
 
 
+# ---------------------------
+# تهيئة الخدمات (Sentry + DB adapter)
+# ---------------------------
 def _initialize_services():
-    """تهيئة الخدمات مثل Sentry وقاعدة البيانات"""
-    # تهيئة Sentry
+    """تهيئة Sentry (اختياري) وإرجاع db_adapter مناسب (Postgres أو SQLite)"""
+    # Sentry
     sentry_dsn = os.environ.get("SENTRY_DSN")
     sentry_env = os.environ.get("SENTRY_ENVIRONMENT", "production")
     if sentry_dsn and SENTRY_AVAILABLE:
         try:
             sentry_sdk.init(
-                dsn=sentry_dsn,
-                traces_sample_rate=1.0,
-                environment=sentry_env,
+                dsn=sentry_dsn, traces_sample_rate=1.0, environment=sentry_env
             )
             logger.info("✅ تم تهيئة Sentry بنجاح")
         except Exception as e:
-            logger.error(f"❌ فشل تهيئة Sentry: {e}")
+            logger.error(f"❌ فشل تهيئة Sentry: {e}", exc_info=True)
 
-    # تهيئة محول قاعدة البيانات
-    if os.environ.get("POSTGRES_URI"):
+    # اختيار مدير قاعدة البيانات
+    if os.environ.get("POSTGRES_URI") and PostgresDBManager is not None:
         db_adapter = PostgresDBManager()
         logger.info("📊 استخدام قاعدة البيانات PostgreSQL")
     else:
         try:
-            from db_manager import SQLiteDBManager
+            from db_manager import SQLiteDBManager  # type: ignore
 
             db_adapter = SQLiteDBManager()
             logger.info("📊 استخدام قاعدة البيانات SQLite المحلية")
-        except ImportError:
-            logger.error("❌ لم يتم العثور على SQLiteDBManager")
+        except Exception as e:
+            logger.error(f"❌ لم يتم العثور على SQLiteDBManager: {e}", exc_info=True)
             raise RuntimeError("لا يمكن العثور على مدير قاعدة بيانات مناسب")
     return db_adapter
 
 
-def _process_update_result(updated, db_adapter):
-    """معالجة نتيجة التحديث"""
-    if updated is False:
-        try:
+# ---------------------------
+# معالجة نتيجة التحديث (blocking) — سننفذها في thread لتجنب حجب الـ event loop
+# ---------------------------
+def _process_update_result_blocking(updated: Optional[bool], db_adapter):
+    """
+    معالجة نتائج التحديث — دالة متزامنة لأنها تتصل بقاعدة البيانات وتستخدم requests.
+    عند الاستخدام داخل الكود async يجب استدعاؤها عبر asyncio.to_thread(...)
+    """
+    try:
+        if updated is False:
             latest_date = db_adapter.get_latest_session_date()
             gaps = db_adapter.detect_data_gaps()
-
             if latest_date:
-                last_date = datetime.strptime(latest_date, "%d/%m/%Y")
-                days_since_update = (datetime.now() - last_date).days
+                try:
+                    last_date = datetime.strptime(latest_date, "%d/%m/%Y")
+                except Exception:
+                    logger.warning(
+                        "تعذر تحويل latest_date إلى datetime — تجاهل الحسابات المتعلقة بالزمن."
+                    )
+                    last_date = None
+
+                days_since_update = (
+                    (datetime.now() - last_date).days if last_date else None
+                )
                 gap_status = ""
 
                 if gaps:
-                    total_missing = sum(gap["gap_length"] for gap in gaps)
+                    total_missing = sum(gap.get("gap_length", 0) for gap in gaps)
                     gap_status = (
                         f" | فجوات: {len(gaps)} فجوة، {total_missing} يوم مفقود"
                     )
 
                 if days_since_update == 0:
                     status, log_level = "محدث اليوم", logging.INFO
-                elif days_since_update <= 2:
+                elif days_since_update is not None and days_since_update <= 2:
                     status, log_level = (
                         f"محدث قبل {days_since_update} يوم",
                         logging.INFO,
                     )
-                elif days_since_update <= 5:
+                elif days_since_update is not None and days_since_update <= 5:
                     status, log_level = (
                         f"تحديث قديم (قبل {days_since_update} يوم)",
                         logging.WARNING,
@@ -397,8 +530,7 @@ def _process_update_result(updated, db_adapter):
 
                 if log_level >= logging.WARNING:
                     _send_alert(
-                        f"تحديث متأخر: البيانات محدثة حتى {latest_date} "
-                        f"(مر {days_since_update} يوم دون تحديث){gap_status}",
+                        f"تحديث متأخر: البيانات محدثة حتى {latest_date} (مر {days_since_update} يوم دون تحديث){gap_status}",
                         severity=(
                             "warning" if log_level == logging.WARNING else "critical"
                         ),
@@ -406,35 +538,42 @@ def _process_update_result(updated, db_adapter):
             else:
                 logger.warning("⚠️ لا توجد بيانات في قاعدة البيانات بعد")
                 _send_alert("لا توجد بيانات في قاعدة البيانات بعد", severity="warning")
-        except Exception as e:
-            logger.error(f"❌ خطأ في تحليل حالة البيانات: {e}")
 
-    elif updated is True:
-        logger.info("✅ تم تحديث البيانات بنجاح.")
-        _reset_failure_count()
-        next_update = calculate_next_update_time()
-        logger.info(
-            f"⏰ سيتم التحديث التالي في: {next_update.strftime('%Y-%m-%d %H:%M')}"
-        )
-        _check_and_send_telegram_alerts(db_adapter)
+            # استدعاء دالة فحص التنبيهات دائمًا
+            _check_and_send_telegram_alerts_blocking(db_adapter)
 
-    elif updated is None:
-        logger.error("❌ فشل في تحديث البيانات - خطأ غير متوقع")
-        _send_alert("فشل غير متوقع في تحديث البيانات", severity="critical")
-    else:
-        logger.info("ℹ️ لا توجد بيانات جديدة للتحديث.")
+        elif updated is True:
+            logger.info("✅ تم تحديث البيانات بنجاح.")
+            _reset_failure_count()
+            next_update = calculate_next_update_time()
+            logger.info(
+                f"⏰ سيتم التحديث التالي في: {next_update.strftime('%Y-%m-%d %H:%M')}"
+            )
+            # فحص وإرسال تنبيهات تليجرام (قد يكون blocking لذا يجب تشغيله داخل thread)
+            _check_and_send_telegram_alerts_blocking(db_adapter)
+
+        elif updated is None:
+            logger.error("❌ فشل في تحديث البيانات - خطأ غير متوقع")
+            _send_alert("فشل غير متوقع في تحديث البيانات", severity="critical")
+        else:
+            logger.info("ℹ️ لا توجد بيانات جديدة للتحديث.")
+            _check_and_send_telegram_alerts_blocking(db_adapter)
+    except Exception as e:
+        logger.error(f"❌ خطأ أثناء معالجة نتيجة التحديث: {e}", exc_info=True)
 
 
-def _check_and_send_telegram_alerts(db_adapter):
-    """فحص وإرسال تنبيهات تليجرام"""
+# ---------------------------
+# فحص وإرسال تنبيهات تليجرام (blocking) — تستدعى داخل thread
+# ---------------------------
+def _check_and_send_telegram_alerts_blocking(db_adapter):
     alerts_enabled = os.environ.get("ALERTS_ENABLED", "true").lower() == "true"
     if not alerts_enabled:
-        logger.info("🚫 تم تعطيل إرسال تنبيهات تليجرام عبر متغيرات البيئة.")
+        logger.info("🚫 تم تعطيل إرسال تنبيجرام عبر متغيرات البيئة.")
         return
 
-    logger.info("ℹ️ بدء فحص تغييرات العائد لإرسال تنبيهات تليجرام...")
+    logger.info("ℹ️ بدء فحص تغييرات العائد لإرسال تنبيجرام...")
     try:
-        alert_manager = AlertManager()
+        manager = AlertManager()
         threshold = float(os.environ.get("ALERTS_THRESHOLD", "0.5"))
         alerts = db_adapter.check_yield_changes(threshold_percent=threshold)
 
@@ -442,7 +581,7 @@ def _check_and_send_telegram_alerts(db_adapter):
             logger.info("👍 لا توجد تغييرات كبيرة في العائد تستدعي إرسال تنبيه.")
             return
 
-        new_alerts = [a for a in alerts if not alert_manager.is_duplicate(a)]
+        new_alerts = [a for a in alerts if not manager.is_duplicate(a)]
         if not new_alerts:
             logger.info("ℹ️ التغييرات المكتشفة تم إرسالها من قبل.")
             return
@@ -450,20 +589,24 @@ def _check_and_send_telegram_alerts(db_adapter):
         logger.info(f"🔔 يوجد {len(new_alerts)} تنبيه جديد سيتم إرساله...")
         success_count = 0
         for alert in new_alerts:
-            if _send_telegram_alert(alert):
-                alert_manager.mark_sent(alert)
+            if _send_telegram_alert_sync(alert):
+                manager.mark_sent(alert)
                 success_count += 1
         logger.info(f"🚀 تم إرسال {success_count} تنبيه جديد بنجاح.")
-
     except Exception as e:
-        logger.error(f"❌ فشل إرسال تنبيهات التليجرام تلقائيًا: {str(e)}", exc_info=True)
+        logger.error(f"❌ فشل إرسال تنبيهات التليجرام تلقائيًا: {e}", exc_info=True)
 
 
+# ---------------------------
+# الدالة الرئيسية (async)
+# ---------------------------
 async def main(force_refresh: bool):
-    """الدالة الرئيسية للتحديث"""
+    """الدالة الرئيسية للتحديث (async)"""
     if not CUSTOM_MODULES_AVAILABLE:
-        print("❌ لا يمكن تشغيل السكريبت بدون المكتبات المطلوبة")
-        sys.exit(1)
+        logger.error(
+            f"❌ لا يمكن تشغيل السكريبت بدون المكتبات المطلوبة: {getattr(missing_custom_modules_error, 'args', missing_custom_modules_error)}"
+        )
+        raise RuntimeError("الموديلات المخصصة غير متاحة.")
 
     if DOTENV_AVAILABLE:
         load_dotenv()
@@ -485,48 +628,54 @@ async def main(force_refresh: bool):
         updated = await safe_fetch_and_update(
             scraper_adapter, db_adapter, force_refresh
         )
-        _process_update_result(updated, db_adapter)
 
-    except (asyncio.TimeoutError, Exception) as e:
-        if isinstance(e, asyncio.TimeoutError):
-            logger.error(f"⏰ {str(e)}")
-            _increment_failure_count()
-            if _FAILURE_COUNT >= _MAX_FAILURES:
-                _send_alert(
-                    f"فشل التحديث {_MAX_FAILURES} مرات متتالية - توقف النظام",
-                    severity="critical",
-                )
-            sys.exit(1)
-        else:
-            logger.error(f"❌ خطأ في جلب البيانات: {str(e)}")
-            _increment_failure_count()
+        # نفذ المعالجة المتزامنة في ثريد حتى لا نحجب الـ event loop
+        await asyncio.to_thread(_process_update_result_blocking, updated, db_adapter)
 
+    except asyncio.TimeoutError as e:
+        logger.error(f"⏰ {str(e)}")
+        _increment_failure_count()
+        if _FAILURE_COUNT >= _MAX_FAILURES:
+            _send_alert(
+                f"فشل التحديث {_MAX_FAILURES} مرات متتالية - توقف النظام",
+                severity="critical",
+            )
+        raise
+    except Exception as e:
+        logger.error(f"❌ خطأ في جلب البيانات أو المعالجة: {e}", exc_info=True)
+        _increment_failure_count()
+        # سجل التفاصيل وأرسل تنبيه
         import traceback
 
-        error_details = f"❗ فشل التحديث المجدول: {e}\n\nتفاصيل الخطأ الكاملة:\n{traceback.format_exc()}"
+        error_details = (
+            f"❗ فشل التحديث المجدول: {e}\n\nتفاصيل:\n{traceback.format_exc()}"
+        )
         logger.critical(error_details)
-        print(f"❌ فشل في التحديث الشامل\n\n{error_details}")
-
         if os.environ.get("SENTRY_DSN") and SENTRY_AVAILABLE:
-            sentry_sdk.capture_exception(e)
-
+            try:
+                sentry_sdk.capture_exception(e)
+            except Exception:
+                pass
         _send_alert(f"فشل التحديث: {str(e)}", severity="critical")
-        sys.exit(1)
-
+        raise
     finally:
         logger.info("=" * 60)
         logger.info("🛑 انتهاء تنفيذ المهمة المجدولة.")
 
 
+# ---------------------------
+# دالة لتشغيل main بأمان (مع معالجة Windows event loop)
+# ---------------------------
 def run_main_safely(force_refresh: bool):
     """
-    تشغيل الدالة الرئيسية بشكل آمن مع معالجة خاصة لـ Windows لحل مشكلة Playwright.
+    يشغّل الدالة الرئيسية مع معالجة خاصة لأنظمة Windows لسياسة الـ event loop.
     """
+
     if platform.system() == "Windows":
         try:
             asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
         except Exception as e:
-            logger.error(f"Failed to set event loop policy: {e}")
+            logger.warning(f"فشل تعيين event loop policy: {e}")
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -540,16 +689,17 @@ def run_main_safely(force_refresh: bool):
                 tasks = asyncio.all_tasks(loop=loop)
                 for task in tasks:
                     task.cancel()
-
                 group = asyncio.gather(*tasks, return_exceptions=True)
                 loop.run_until_complete(asyncio.wait_for(group, timeout=5.0))
-
             except asyncio.TimeoutError:
                 logger.warning("⚠️ تجاوز الوقت المسموح به أثناء تنظيف المهام.")
             except Exception as e:
-                logger.error(f"Error during asyncio cleanup: {e}")
+                logger.error(f"Error during asyncio cleanup: {e}", exc_info=True)
             finally:
-                loop.close()
+                try:
+                    loop.close()
+                except Exception:
+                    pass
                 asyncio.set_event_loop(None)
     else:
         try:
@@ -559,6 +709,9 @@ def run_main_safely(force_refresh: bool):
             sys.exit(0)
 
 
+# ---------------------------
+# CLI entrypoint
+# ---------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Update Treasury Bill data from CBE to your database.",
@@ -568,12 +721,14 @@ if __name__ == "__main__":
   python update_data.py                    # تحديث عادي
   python update_data.py --force-refresh    # تحديث مع تجاهل الكاش
   
-متغيرات البيئة المطلوبة:
-  POSTGRES_URI                 # رابط قاعدة البيانات
+متغيرات البيئة (يمكن استخدام PostgreSQL أو SQLite كبديل):
+  POSTGRES_URI                 # (اختياري) رابط قاعدة البيانات PostgreSQL
   SENTRY_DSN                   # (اختياري) رابط Sentry للأخطاء  
   SLACK_WEBHOOK_URL            # (اختياري) رابط Slack للتنبيهات
   ALERTS_ENABLED               # (اختياري) تفعيل التنبيهات (افتراضي: true)
   ALERTS_THRESHOLD             # (اختياري) حد التنبيهات (افتراضي: 0.5)
+  TELEGRAM_BOT_TOKEN           # (لاستيراد) توكن بوت تليجرام لإرسال التنبيهات
+  TELEGRAM_CHAT_ID             # (لاستيراد) chat_id لاستقبال التنبيهات
         """,
     )
     parser.add_argument(
@@ -581,7 +736,6 @@ if __name__ == "__main__":
         action="store_true",
         help="Bypass the cache and force a fresh data fetch from the website.",
     )
-
     args = parser.parse_args()
 
     print(f"🚀 بدء تشغيل السكريبت على {platform.system()}")
