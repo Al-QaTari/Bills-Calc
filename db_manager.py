@@ -6,7 +6,7 @@ from typing import Tuple, Optional, List, Dict, Any
 import streamlit as st
 import pytz
 from sqlalchemy import create_engine, text
-from datetime import datetime
+from datetime import datetime, timedelta
 import sys
 from concurrent.futures import ThreadPoolExecutor
 
@@ -230,6 +230,87 @@ class SQLiteDBManager(HistoricalDataStore):
             logger.error(f"Failed to load historical  {e}", exc_info=True)
             return pd.DataFrame()
 
+    def check_yield_changes(self, threshold_percent: float = 0.5) -> list:
+        """
+        تقوم بفحص التغييرات في العائد وإرجاع قائمة بالتنبيهات.
+        """
+        try:
+            latest_data, _ = self.load_latest_data()
+            if latest_data.empty:
+                return []
+
+            all_data = self.load_all_historical_data()
+            if all_data.empty or len(all_data) < 2:
+                return []
+
+            # استخدام أسماء الأعمدة من ملف الثوابت
+            date_col_name = C.SESSION_DATE_COLUMN_NAME
+            tenor_col = C.TENOR_COLUMN_NAME
+            yield_col = C.YIELD_COLUMN_NAME
+
+            latest_data[date_col_name] = pd.to_datetime(
+                latest_data[date_col_name], dayfirst=True, errors="coerce"
+            )
+            all_data[date_col_name] = pd.to_datetime(
+                all_data[date_col_name], dayfirst=True, errors="coerce"
+            )
+
+            latest_data.dropna(subset=[date_col_name], inplace=True)
+            all_data.dropna(subset=[date_col_name], inplace=True)
+
+            if latest_data.empty or all_data.empty:
+                return []
+
+            latest_date = latest_data[date_col_name].max()
+
+            # استبعاد التواريخ المساوية أو الأحدث من التاريخ الأخير
+            previous_data_full = all_data[
+                all_data[date_col_name].dt.date < latest_date.date()
+            ]
+
+            if previous_data_full.empty:
+                return []
+
+            previous_date = previous_data_full[date_col_name].max()
+            previous_data = previous_data_full[
+                previous_data_full[date_col_name] == previous_date
+            ]
+
+            merged_data = pd.merge(
+                latest_data, previous_data, on=tenor_col, suffixes=("_latest", "_prev")
+            )
+
+            if merged_data.empty:
+                return []
+
+            merged_data["change_percent"] = (
+                (merged_data[f"{yield_col}_latest"] - merged_data[f"{yield_col}_prev"])
+                / merged_data[f"{yield_col}_prev"]
+            ) * 100
+
+            alerts_df = merged_data[
+                abs(merged_data["change_percent"]) >= threshold_percent
+            ]
+
+            alerts = []
+            for _, row in alerts_df.iterrows():
+                alerts.append(
+                    {
+                        "tenor": row[tenor_col],
+                        "latest_yield": row[f"{yield_col}_latest"],
+                        "previous_yield": row[f"{yield_col}_prev"],
+                        "change_percent": row["change_percent"],
+                        "direction": "زيادة" if row["change_percent"] > 0 else "انخفاض",
+                        "latest_date": latest_date.strftime("%Y-%m-%d"),
+                        "previous_date": previous_date.strftime("%Y-%m-%d"),
+                    }
+                )
+
+            return alerts
+        except Exception as e:
+            logger.error(f"ERROR in check_yield_changes: {e}", exc_info=True)
+            return []
+
     def get_latest_session_date(self) -> Optional[str]:
         try:
             # استخدام استعلام أكثر كفاءة
@@ -306,8 +387,6 @@ class SQLiteDBManager(HistoricalDataStore):
                 return []
 
             # تحويل التواريخ إلى كائنات datetime للفحص
-            from datetime import datetime, timedelta
-
             date_format = "%d/%m/%Y"
 
             # تحويل التواريخ إلى قائمة كائنات datetime
