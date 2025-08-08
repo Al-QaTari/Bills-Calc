@@ -455,6 +455,27 @@ class SQLiteDBManager(HistoricalDataStore):
             logger.error(f"فشل في حساب عدد التحديثات اليومية: {str(e)}", exc_info=True)
             return 0
 
+    def clean_old_records(self, cutoff_date_str: str) -> int:
+        """
+        مسح السجلات الأقدم من تاريخ محدد.
+        Args:
+            cutoff_date_str: التاريخ المحدد (بتنسيق 'YYYY-MM-DD').
+        Returns:
+            عدد السجلات التي تم حذفها.
+        """
+        try:
+            with self.engine.begin() as conn:
+                query = text(
+                    f'DELETE FROM "{C.TABLE_NAME}" WHERE "{C.DATE_COLUMN_NAME}" < :cutoff_date'
+                )
+                result = conn.execute(query, {"cutoff_date": cutoff_date_str})
+                deleted_rows = result.rowcount
+                logger.info(f"🗑️ تم حذف {deleted_rows} سجل أقدم من {cutoff_date_str}.")
+                return deleted_rows
+        except Exception as e:
+            logger.error(f"❌ فشل في حذف السجلات القديمة: {str(e)}", exc_info=True)
+            raise
+
     def vacuum_database(self):
         """تحسين هيكل قاعدة البيانات وتحرير المساحة"""
         try:
