@@ -440,6 +440,45 @@ class PostgresDBManager(HistoricalDataStore):
             logger.error(f"فشل في حساب عدد التحديثات اليومية: {str(e)}", exc_info=True)
             return 0
 
+    def vacuum_database(self):
+        """تحسين هيكل قاعدة البيانات وتحرير المساحة في PostgreSQL"""
+        try:
+            # Use a connection with autocommit to run VACUUM outside a transaction block
+            with self.engine.connect().execution_options(
+                isolation_level="AUTOCOMMIT"
+            ) as conn:
+                conn.execute(text("VACUUM ANALYZE"))
+            logger.info("✅ تم تنفيذ VACUUM وANALYZE بنجاح على PostgreSQL")
+        except Exception as e:
+            logger.error(f"فشل في تنفيذ VACUUM على PostgreSQL: {str(e)}", exc_info=True)
+
+    def clean_old_records(self, cutoff_date_str: str) -> int:
+        """
+        مسح السجلات الأقدم من تاريخ محدد في PostgreSQL.
+        Args:
+            cutoff_date_str: التاريخ المحدد (بتنسيق 'YYYY-MM-DD').
+        Returns:
+            عدد السجلات التي تم حذفها.
+        """
+        try:
+            with self._get_connection() as conn:
+                with conn.begin():
+                    # Use standard SQL CAST for better compatibility
+                    query = text(
+                        f'DELETE FROM "{C.TABLE_NAME}" WHERE "{C.DATE_COLUMN_NAME}" < CAST(:cutoff_date AS DATE)'
+                    )
+                    result = conn.execute(query, {"cutoff_date": cutoff_date_str})
+                    deleted_rows = result.rowcount
+                    logger.info(
+                        f"🗑️ تم حذف {deleted_rows} سجل من PostgreSQL أقدم من {cutoff_date_str}."
+                    )
+                    return deleted_rows
+        except Exception as e:
+            logger.error(
+                f"❌ فشل في حذف السجلات القديمة من PostgreSQL: {str(e)}", exc_info=True
+            )
+            raise
+
 
 @st.cache_resource
 def get_db_manager() -> HistoricalDataStore:
