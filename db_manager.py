@@ -9,10 +9,17 @@ from sqlalchemy import create_engine, text
 from datetime import datetime, timedelta
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path  # ✅ تم إضافة هذا الاستيراد
+from pathlib import Path
 
 from treasury_core.ports import HistoricalDataStore
 import constants as C
+
+# ✅ إضافة استيراد PostgresDBManager
+PostgresDBManager = None
+try:
+    from postgres_manager import PostgresDBManager
+except ImportError:
+    pass
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -29,11 +36,15 @@ if not os.path.exists(DATA_DIR):
 
 class SQLiteDBManager(HistoricalDataStore):
     def __init__(self, db_filename: str = C.DB_FILENAME):
-        # ✅ تم التعديل هنا: ربط المسار المطلق للمجلد مع اسم الملف
         self.db_filename = db_filename
-        self.db_path = DATA_DIR / db_filename
-        db_uri = f"sqlite:///{self.db_path}"
 
+        # ✅ تم التعديل هنا: فحص إذا كان اسم الملف هو ':memory:'
+        if db_filename == ":memory:":
+            self.db_path = db_filename
+        else:
+            self.db_path = DATA_DIR / db_filename
+
+        db_uri = f"sqlite:///{self.db_path}"
         # تكوين مُحسّن لـ SQLite
         connect_args = {
             "check_same_thread": False,
@@ -68,9 +79,7 @@ class SQLiteDBManager(HistoricalDataStore):
 
     def _init_db(self) -> None:
         try:
-            # ✅ تم التعديل: استخدام المحرك للاتصال وتنفيذ الأوامر
             with self.engine.connect() as conn:
-                # إنشاء الجدول
                 conn.execute(
                     text(
                         f"""
@@ -85,7 +94,6 @@ class SQLiteDBManager(HistoricalDataStore):
                     )
                 )
 
-                # فهارس مُحسّنة لمشروع كبير
                 conn.execute(
                     text(
                         f"""
@@ -129,17 +137,13 @@ class SQLiteDBManager(HistoricalDataStore):
         if "session_date_dt" in df_to_save.columns:
             df_to_save.drop(columns=["session_date_dt"], inplace=True)
 
-        # تحويل التاريخ إلى string لـ SQLite
         if C.DATE_COLUMN_NAME in df_to_save.columns:
             df_to_save[C.DATE_COLUMN_NAME] = df_to_save[C.DATE_COLUMN_NAME].astype(str)
 
         try:
-            # تحسين الكتابة باستخدام executemany
             with self.engine.begin() as conn:
-                # تحويل DataFrame إلى قائمة سجلات
                 records = df_to_save.to_dict("records")
 
-                # استخدام executemany مع قائمة من القواميس
                 conn.execute(
                     text(
                         f"""
@@ -160,7 +164,6 @@ class SQLiteDBManager(HistoricalDataStore):
         self,
     ) -> Tuple[pd.DataFrame, Tuple[Optional[str], Optional[str]]]:
         try:
-            # استخدام استعلام مُحسّن بدون CTE
             query = f"""
                 SELECT 
                     t."{C.TENOR_COLUMN_NAME}", 
@@ -173,16 +176,14 @@ class SQLiteDBManager(HistoricalDataStore):
                     FROM "{C.TABLE_NAME}" t2 
                     WHERE t2."{C.TENOR_COLUMN_NAME}" = t."{C.TENOR_COLUMN_NAME}"
                 )
-                LIMIT {len(C.TENORS)}  -- لأننا نعرف عدد الآجال مسبقاً
+                LIMIT {len(C.TENORS)}
             """
             df = pd.read_sql_query(query, self.engine)
 
             if not df.empty:
-                # معالجة أسرع لتحويل التوقيت
                 last_update_dt_utc = pd.to_datetime(df["max_scrape_date"].iloc[0])
                 cairo_tz = pytz.timezone(C.TIMEZONE)
 
-                # تجنب التحويلات الزائدة إذا كانت البيانات بالفعل بتوقيت UTC
                 if last_update_dt_utc.tzinfo is None:
                     last_update_dt_utc = last_update_dt_utc.tz_localize("UTC")
 
@@ -202,8 +203,7 @@ class SQLiteDBManager(HistoricalDataStore):
 
     def load_all_historical_data(self) -> pd.DataFrame:
         try:
-            # استخدام استعلام مُقسّم لتجنب استهلاك الذاكرة
-            chunk_size = 5000  # حجم الكتلة المناسب
+            chunk_size = 5000
             all_dfs = []
             offset = 0
 
@@ -224,8 +224,7 @@ class SQLiteDBManager(HistoricalDataStore):
                 all_dfs.append(chunk_df)
                 offset += chunk_size
 
-                # التحقق من استخدام الذاكرة
-                if sys.getsizeof(all_dfs) > 100 * 1024 * 1024:  # 100MB
+                if sys.getsizeof(all_dfs) > 100 * 1024 * 1024:
                     logger.warning("⚠️ استخدام الذاكرة مرتفع، معالجة البيانات على مراحل")
                     return pd.concat(all_dfs)
 
@@ -237,9 +236,6 @@ class SQLiteDBManager(HistoricalDataStore):
             return pd.DataFrame()
 
     def check_yield_changes(self, threshold_percent: float = 0.5) -> list:
-        """
-        تقوم بفحص التغييرات في العائد وإرجاع قائمة بالتنبيهات.
-        """
         try:
             latest_data, _ = self.load_latest_data()
             if latest_data.empty:
@@ -249,7 +245,6 @@ class SQLiteDBManager(HistoricalDataStore):
             if all_data.empty or len(all_data) < 2:
                 return []
 
-            # استخدام أسماء الأعمدة من ملف الثوابت
             date_col_name = C.SESSION_DATE_COLUMN_NAME
             tenor_col = C.TENOR_COLUMN_NAME
             yield_col = C.YIELD_COLUMN_NAME
@@ -269,7 +264,6 @@ class SQLiteDBManager(HistoricalDataStore):
 
             latest_date = latest_data[date_col_name].max()
 
-            # استبعاد التواريخ المساوية أو الأحدث من التاريخ الأخير
             previous_data_full = all_data[
                 all_data[date_col_name].dt.date < latest_date.date()
             ]
@@ -319,7 +313,6 @@ class SQLiteDBManager(HistoricalDataStore):
 
     def get_latest_session_date(self) -> Optional[str]:
         try:
-            # استخدام استعلام أكثر كفاءة
             with self.engine.connect() as conn:
                 query = text(
                     f"""
@@ -341,16 +334,8 @@ class SQLiteDBManager(HistoricalDataStore):
             return None
 
     def get_data_hash_for_date(self, session_date: str) -> Optional[str]:
-        """
-        استرجاع تجزئة البيانات لجلسة معينة.
-        Args:
-            session_date: تاريخ الجلسة لاسترجاع تجزئة البيانات له
-        Returns:
-            تجزئة MD5 للبيانات أو None في حالة الفشل
-        """
         try:
             with self.engine.connect() as conn:
-                # استخدام دالة GROUP_CONCAT لـ SQLite
                 query = text(
                     f"""
                     SELECT 
@@ -369,13 +354,7 @@ class SQLiteDBManager(HistoricalDataStore):
             return None
 
     def detect_data_gaps(self) -> List[Dict[str, Any]]:
-        """
-        الكشف عن الفجوات في البيانات التاريخية بدقة.
-        Returns:
-            قائمة تحتوي على تفاصيل الفجوات المكتشفة
-        """
         try:
-            # الحصول على جميع تواريخ الجلسات من قاعدة البيانات
             with self.engine.connect() as conn:
                 query = text(
                     f"""
@@ -392,27 +371,21 @@ class SQLiteDBManager(HistoricalDataStore):
             if not db_dates:
                 return []
 
-            # تحويل التواريخ إلى كائنات datetime للفحص
             date_format = "%d/%m/%Y"
 
-            # تحويل التواريخ إلى قائمة كائنات datetime
             db_date_objects = [datetime.strptime(d, date_format) for d in db_dates]
 
-            # فرز التواريخ
             db_date_objects.sort()
 
-            # الكشف عن الفجوات
             gaps = []
             for i in range(1, len(db_date_objects)):
                 diff = (db_date_objects[i] - db_date_objects[i - 1]).days
-                if diff > 1:  # فجوة تزيد عن يوم واحد
-                    # تجاهل العطلات الأسبوعية (الجمعة والسبت)
+                if diff > 1:
                     current = db_date_objects[i - 1] + timedelta(days=1)
                     gap_days = []
 
                     while current < db_date_objects[i]:
-                        # تجاهل العطلات
-                        if current.weekday() not in [4, 5]:  # الجمعة والسبت
+                        if current.weekday() not in [4, 5]:
                             gap_days.append(current)
                         current += timedelta(days=1)
 
@@ -436,22 +409,11 @@ class SQLiteDBManager(HistoricalDataStore):
             return []
 
     def is_duplicate_data(self, new_data: pd.DataFrame) -> Tuple[bool, str]:
-        """
-        تحليل دقيق لتحديد ما إذا كانت البيانات الجديدة مكررة.
-
-        Args:
-            new_data: البيانات الجديدة المراد مقارنتها
-
-        Returns:
-            (is_duplicate, reason) - هل البيانات مكررة ولماذا
-        """
         if new_data.empty:
             return False, "البيانات فارغة"
 
-        # الحصول على أحدث تاريخ جلسة
         latest_session_date = new_data[C.SESSION_DATE_COLUMN_NAME].iloc[0]
 
-        # جلب البيانات الحالية لهذا التاريخ
         try:
             with self.engine.connect() as conn:
                 query = text(
@@ -467,33 +429,26 @@ class SQLiteDBManager(HistoricalDataStore):
                 if current_data.empty:
                     return False, "لا توجد بيانات سابقة لهذا التاريخ"
 
-                # مقارنة البيانات بشكل دقيق
-                # فرز البيانات حسب الآجال للتأكد من المقارنة الصحيحة
                 current_data = current_data.sort_values(by=C.TENOR_COLUMN_NAME)
                 new_data_sorted = new_data.sort_values(by=C.TENOR_COLUMN_NAME)
 
-                # التحقق من عدد الآجال
                 if len(current_data) != len(new_data_sorted):
                     return (
                         False,
                         f"عدد الآجال مختلف ({len(current_data)} مقابل {len(new_data_sorted)})",
                     )
 
-                # التحقق من الاختلافات في القيم
-                tolerance = 0.001  # 0.1% هامش خطأ مقبول
+                tolerance = 0.001
 
-                # تحويل البيانات إلى مصفوفات لمقارنة أسرع
                 current_yields = current_data[C.YIELD_COLUMN_NAME].values
                 new_yields = new_data_sorted[C.YIELD_COLUMN_NAME].values
 
-                # التحقق من الاختلافات في القيم
                 differences = abs(current_yields - new_yields)
                 max_diff = differences.max()
 
                 if max_diff <= tolerance:
                     return True, f"البيانات متطابقة مع هامش خطأ {max_diff:.6f}"
                 else:
-                    # تحديد الآجال التي تختلف
                     different_tenors = []
                     for i, diff in enumerate(differences):
                         if diff > tolerance:
@@ -515,13 +470,7 @@ class SQLiteDBManager(HistoricalDataStore):
             return False, f"خطأ في التحليل: {str(e)}"
 
     def get_daily_update_count(self) -> int:
-        """
-        حساب عدد مرات التحديث في اليوم الحالي.
-        Returns:
-            عدد مرات التحديث في اليوم الحالي
-        """
         try:
-            # تحويل التاريخ إلى تنسيق DD/MM/YYYY للاستخدام في الاستعلام
             today_ddmmyyyy = datetime.now().strftime("%d/%m/%Y")
 
             with self.engine.connect() as conn:
@@ -541,13 +490,6 @@ class SQLiteDBManager(HistoricalDataStore):
             return 0
 
     def clean_old_records(self, cutoff_date_str: str) -> int:
-        """
-        مسح السجلات الأقدم من تاريخ محدد.
-        Args:
-            cutoff_date_str: التاريخ المحدد (بتنسيق 'YYYY-MM-DD').
-        Returns:
-            عدد السجلات التي تم حذفها.
-        """
         try:
             with self.engine.begin() as conn:
                 query = text(
@@ -562,7 +504,6 @@ class SQLiteDBManager(HistoricalDataStore):
             raise
 
     def vacuum_database(self):
-        """تحسين هيكل قاعدة البيانات وتحرير المساحة"""
         try:
             with self.engine.connect() as conn:
                 conn.execute(text("VACUUM"))
@@ -572,7 +513,6 @@ class SQLiteDBManager(HistoricalDataStore):
             logger.error(f"فشل في تنفيذ VACUUM: {str(e)}", exc_info=True)
 
     def clear_all_data(self) -> None:
-        """مسح جميع البيانات من الجدول الرئيسي في SQLite"""
         try:
             with self.engine.begin() as conn:
                 conn.execute(text(f'DELETE FROM "{C.TABLE_NAME}"'))
@@ -582,8 +522,6 @@ class SQLiteDBManager(HistoricalDataStore):
             raise
 
     def _run_query_in_background(self, query: str, params: dict = None) -> pd.DataFrame:
-        """تشغيل الاستعلام في خيط منفصل لتجنب حظر البرنامج الرئيسي"""
-
         def query_worker():
             try:
                 with self.engine.connect() as conn:
@@ -592,16 +530,40 @@ class SQLiteDBManager(HistoricalDataStore):
                 logger.error(f"فشل في تنفيذ الاستعلام في الخلفية: {e}", exc_info=True)
                 return pd.DataFrame()
 
-        # تشغيل الاستعلام في خيط منفصل
         with ThreadPoolExecutor() as executor:
             future = executor.submit(query_worker)
             try:
-                return future.result(timeout=30)  # مهلة زمنية 30 ثانية
+                return future.result(timeout=30)
             except TimeoutError:
                 logger.error("⏰ تجاوز الوقت المسموح للاستعلام")
                 return pd.DataFrame()
 
 
 @st.cache_resource
-def get_db_manager(db_filename: str = C.DB_FILENAME) -> HistoricalDataStore:
-    return SQLiteDBManager(db_filename)
+def get_db_manager(
+    db_filename: str = C.DB_FILENAME,
+) -> Tuple[HistoricalDataStore, str]:  # ✅ تم تغيير نوع الإرجاع
+    """
+    ✅ تم التعديل: اختيار مدير قاعدة البيانات وإرجاع اسمه.
+    """
+    # 1. محاولة تهيئة PostgreSQL
+    if PostgresDBManager and os.environ.get("POSTGRES_URI"):
+        try:
+            manager = PostgresDBManager()
+            message = "PostgreSQL"
+            logger.info(f"📊 استخدام قاعدة البيانات {message} (رئيسي)")
+            return manager, message
+        except Exception as e:
+            logger.warning(
+                f"⚠️ فشل الاتصال بقاعدة بيانات PostgreSQL: {e}. سيتم استخدام SQLite كبديل."
+            )
+
+    # 2. في حالة عدم وجود POSTGRES_URI أو فشل الاتصال، يتم استخدام SQLite
+    try:
+        manager = SQLiteDBManager(db_filename)
+        message = "SQLite"
+        logger.info(f"📊 استخدام قاعدة البيانات {message} المحلية (احتياطي)")
+        return manager, message
+    except Exception as e:
+        logger.error(f"❌ فشل تهيئة SQLiteDBManager: {e}", exc_info=True)
+        raise RuntimeError("لا يمكن العثور على مدير قاعدة بيانات مناسب")
