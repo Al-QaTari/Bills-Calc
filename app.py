@@ -12,8 +12,12 @@ import streamlit as st
 import sentry_sdk
 from dotenv import load_dotenv
 import subprocess
+import time
+from typing import Tuple
 
-from dependency_container import container
+from dependency_container import container  # ✅ تم إعادة هذا الاستيراد
+from db_manager import get_db_manager  # ✅ تم استيراد الدالة المعدلة
+
 from utils import (
     setup_logging,
     prepare_arabic_text,
@@ -140,22 +144,23 @@ def _ensure_playwright_unix():
         return False
 
 
-@st.cache_resource
-def get_db_manager() -> HistoricalDataStore:
-    """Get cached database manager instance."""
-    return container.get(HistoricalDataStore)
+# ✅ تم التعديل: إعادة دالة get_db_manager_with_info لتنفيذ المنطق المعدل
+# @st.cache_resource
+def get_db_manager_with_info() -> Tuple[HistoricalDataStore, str]:
+    return get_db_manager()
 
 
 @st.cache_resource
 def get_data_source() -> YieldDataSource:
     """Get cached data source instance."""
-    return container.get(YieldDataSource)
+    return container.get(YieldDataSource)  # ✅ تم الإبقاء على هذا السطر
 
 
 def load_historical_data():
     """Load historical data into session state."""
     if "historical_df" not in st.session_state:
-        db_manager = get_db_manager()
+        # ✅ تم التعديل: استخدام الدالة الجديدة للحصول على المدير واسم القاعدة
+        db_manager, _ = get_db_manager_with_info()
         historical_data = db_manager.load_all_historical_data()
         StateManager.set("historical_df", historical_data)
         logging.info(f"تم تحميل {len(historical_data)} سجل تاريخي في ذاكرة التطبيق.")
@@ -206,6 +211,15 @@ def main():
     except Exception as e:
         logging.warning(f"Page config error (non-critical): {str(e)}")
         # Continue without page config if it fails
+
+    # ✅ الكود الجديد لعرض الرسالة المؤقتة
+    if "db_message_shown" not in st.session_state:
+        db_manager, db_name = get_db_manager_with_info()
+        placeholder = st.empty()
+        placeholder.info(f"📊 تم تحديد {db_name} كقاعدة بيانات رئيسية.")
+        time.sleep(3)
+        placeholder.empty()
+        st.session_state["db_message_shown"] = True
 
     # Ensure Playwright browsers are installed
     try:
@@ -271,7 +285,9 @@ def main():
         render_help_page,
     )
     try:
-        render_secret_admin_panel(get_db_manager())
+        # ✅ تم التعديل: استخدام الدالة الجديدة
+        db_manager, _ = get_db_manager_with_info()
+        render_secret_admin_panel(db_manager)
     except Exception as e:
         logging.error(f"Error rendering secret admin panel: {str(e)}")
     # لا نريد إظهار خطأ للمستخدم العادي، فقط التسجيل
