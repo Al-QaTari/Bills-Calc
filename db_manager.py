@@ -9,6 +9,7 @@ from sqlalchemy import create_engine, text
 from datetime import datetime, timedelta
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path  # ✅ تم إضافة هذا الاستيراد
 
 from treasury_core.ports import HistoricalDataStore
 import constants as C
@@ -18,15 +19,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-DATA_DIR = "data"
+# ✅ تم التعديل هنا: استخدام مسار مطلق بناءً على موقع الملف
+PROJECT_ROOT = Path(__file__).resolve().parent
+DATA_DIR = PROJECT_ROOT / "data"
+
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
 
 
 class SQLiteDBManager(HistoricalDataStore):
     def __init__(self, db_filename: str = C.DB_FILENAME):
+        # ✅ تم التعديل هنا: ربط المسار المطلق للمجلد مع اسم الملف
         self.db_filename = db_filename
-        db_uri = f"sqlite:///{self.db_filename}"
+        self.db_path = DATA_DIR / db_filename
+        db_uri = f"sqlite:///{self.db_path}"
 
         # تكوين مُحسّن لـ SQLite
         connect_args = {
