@@ -64,9 +64,19 @@ class PostgresDBManager(HistoricalDataStore):
         if "session_date_dt" in df_to_save.columns:
             df_to_save.drop(columns=["session_date_dt"], inplace=True)
 
+        # التحقق من صحة التواريخ قبل الحفظ
         df_to_save[C.DATE_COLUMN_NAME] = pd.to_datetime(
             df_to_save[C.DATE_COLUMN_NAME], errors="coerce"
         )
+
+        # التحقق من وجود تواريخ غير صالحة (1970-01-01)
+        invalid_dates = df_to_save[C.DATE_COLUMN_NAME].dt.year == 1970
+        if invalid_dates.any():
+            logger.warning(
+                f"⚠️ تم العثور على {invalid_dates.sum()} سجل بتاريخ غير صالح (1970)، سيتم إزالته"
+            )
+            df_to_save = df_to_save[~invalid_dates]
+
         df_to_save = df_to_save[df_to_save[C.DATE_COLUMN_NAME].notnull()]
         if df_to_save.empty:
             logger.warning("⚠️ لم يتم حفظ أي بيانات: جميع القيم الزمنية غير صالحة.")
@@ -155,12 +165,21 @@ class PostgresDBManager(HistoricalDataStore):
                 if df.empty or "max_scrape_date" not in df.columns:
                     return pd.DataFrame(), ("البيانات الأولية", None)
 
-                if pd.isnull(df["max_scrape_date"].iloc[0]):
+                max_scrape_date = df["max_scrape_date"].iloc[0]
+
+                # التحقق من أن التاريخ ليس None أو NaT
+                if pd.isnull(max_scrape_date):
+                    logger.warning("⚠️ تاريخ الاستخراج غير صالح (None/NaT)")
                     return pd.DataFrame(), ("البيانات الأولية", None)
 
-                max_date_raw = df["max_scrape_date"].iloc[0]
-                last_update_dt_utc = pd.to_datetime(max_date_raw, errors="coerce")
+                last_update_dt_utc = pd.to_datetime(max_scrape_date, errors="coerce")
                 if pd.isnull(last_update_dt_utc):
+                    logger.warning("⚠️ فشل تحويل تاريخ الاستخراج")
+                    return pd.DataFrame(), ("البيانات الأولية", None)
+
+                # التحقق من أن التاريخ ليس 1970-01-01 (Unix epoch)
+                if last_update_dt_utc.year == 1970:
+                    logger.warning("⚠️ تاريخ الاستخراج غير صالح (1970-01-01)")
                     return pd.DataFrame(), ("البيانات الأولية", None)
 
                 if last_update_dt_utc.tzinfo is None:
