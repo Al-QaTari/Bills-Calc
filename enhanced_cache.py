@@ -102,11 +102,23 @@ class EnhancedCache(Generic[T]):
                 # Retrieve DataFrame
                 df = pd.read_json(StringIO(cached_data.decode("utf-8")), lines=True)
 
-                # Handle date column
+                # Handle date column with better timezone handling
                 if C.DATE_COLUMN_NAME in df.columns:
+                    # First try to parse as ISO format with timezone info
                     df[C.DATE_COLUMN_NAME] = pd.to_datetime(
-                        df[C.DATE_COLUMN_NAME], errors="coerce", utc=True
+                        df[C.DATE_COLUMN_NAME], errors="coerce"
                     )
+
+                    # If the dates are timezone-naive, localize them to UTC
+                    if df[C.DATE_COLUMN_NAME].dt.tz is None:
+                        df[C.DATE_COLUMN_NAME] = df[C.DATE_COLUMN_NAME].dt.tz_localize(
+                            "UTC"
+                        )
+                    # If they have timezone info, convert to UTC
+                    else:
+                        df[C.DATE_COLUMN_NAME] = df[C.DATE_COLUMN_NAME].dt.tz_convert(
+                            "UTC"
+                        )
 
                 return df  # type: ignore
             else:
@@ -146,11 +158,18 @@ class EnhancedCache(Generic[T]):
 
             # Handle different data types
             if isinstance(value, pd.DataFrame):
-                # Store DataFrame
+                # Store DataFrame with better date handling
+                # Convert datetime columns to ISO format for better preservation
+                df_to_store = value.copy()
+                if C.DATE_COLUMN_NAME in df_to_store.columns:
+                    df_to_store[C.DATE_COLUMN_NAME] = df_to_store[
+                        C.DATE_COLUMN_NAME
+                    ].dt.strftime("%Y-%m-%d %H:%M:%S%z")
+
                 self.redis_client.setex(
                     full_key,
                     ttl_seconds,
-                    value.to_json(orient="records", lines=True),
+                    df_to_store.to_json(orient="records", lines=True),
                 )
             else:
                 # Store general objects as JSON
