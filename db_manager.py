@@ -137,7 +137,28 @@ class SQLiteDBManager(HistoricalDataStore):
         if "session_date_dt" in df_to_save.columns:
             df_to_save.drop(columns=["session_date_dt"], inplace=True)
 
+        # التحقق من صحة التواريخ قبل الحفظ
         if C.DATE_COLUMN_NAME in df_to_save.columns:
+            # تحويل التواريخ إلى datetime للفحص
+            date_series = pd.to_datetime(
+                df_to_save[C.DATE_COLUMN_NAME], errors="coerce"
+            )
+
+            # التحقق من وجود تواريخ غير صالحة (1970-01-01)
+            invalid_dates = date_series.dt.year == 1970
+            if invalid_dates.any():
+                logger.warning(
+                    f"⚠️ تم العثور على {invalid_dates.sum()} سجل بتاريخ غير صالح (1970)، سيتم إزالته"
+                )
+                df_to_save = df_to_save[~invalid_dates]
+
+                if df_to_save.empty:
+                    logger.error(
+                        "❌ لا توجد بيانات صالحة للحفظ بعد إزالة التواريخ غير الصالحة"
+                    )
+                    return
+
+            # تحويل التواريخ إلى نص للحفظ
             df_to_save[C.DATE_COLUMN_NAME] = df_to_save[C.DATE_COLUMN_NAME].astype(str)
 
         try:
@@ -181,7 +202,21 @@ class SQLiteDBManager(HistoricalDataStore):
             df = pd.read_sql_query(query, self.engine)
 
             if not df.empty:
-                last_update_dt_utc = pd.to_datetime(df["max_scrape_date"].iloc[0])
+                # التحقق من أن التاريخ صالح وليس 1970-01-01
+                max_scrape_date = df["max_scrape_date"].iloc[0]
+
+                # التحقق من أن التاريخ ليس None أو NaT
+                if pd.isna(max_scrape_date):
+                    logger.warning("⚠️ تاريخ الاستخراج غير صالح (None/NaT)")
+                    return pd.DataFrame(), ("البيانات الأولية", None)
+
+                last_update_dt_utc = pd.to_datetime(max_scrape_date)
+
+                # التحقق من أن التاريخ ليس 1970-01-01 (Unix epoch)
+                if last_update_dt_utc.year == 1970:
+                    logger.warning("⚠️ تاريخ الاستخراج غير صالح (1970-01-01)")
+                    return pd.DataFrame(), ("البيانات الأولية", None)
+
                 cairo_tz = pytz.timezone(C.TIMEZONE)
 
                 if last_update_dt_utc.tzinfo is None:
