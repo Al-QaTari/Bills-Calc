@@ -706,7 +706,8 @@ async def fetch_and_update_data_async(
         is_duplicate, reason = data_store.is_duplicate_data(latest_data)
         if is_duplicate:
             if status_callback:
-                status_callback(f"البيانات لم تتغير على الموقع وهي مكررة: {reason}")
+                status_callback(f"✅ البيانات مكررة - لا حاجة للحفظ: {reason}")
+            logger.info(f"✅ تم اكتشاف البيانات المكررة: {reason}")
             return False
 
         # إذا لم تكن مكررة، تحقق من الفجوات أولاً
@@ -734,8 +735,9 @@ async def fetch_and_update_data_async(
             data_store.save_data(latest_data)
 
             if status_callback:
-                status_callback("اكتمل تحديث البيانات بنجاح!")
+                status_callback("✅ تم حفظ البيانات الجديدة بنجاح!")
 
+            logger.info("✅ تم حفظ البيانات الجديدة في قاعدة البيانات")
             _reset_failure_count()
             return True
 
