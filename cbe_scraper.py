@@ -702,7 +702,15 @@ async def fetch_and_update_data_async(
         if status_callback:
             status_callback("تم الجلب، جاري التحقق من التكرار...")
 
-        # التحقق دائمًا مما إذا كانت البيانات مكررة قبل الحفظ
+        # التحقق دائمًا مما إذا كانت البيانات مكررة قبل أي محاولة ملء فجوات أو حفظ
+        debug_cols = [
+            getattr(C, "TENOR_COLUMN_NAME", "tenor"),
+            getattr(C, "YIELD_COLUMN_NAME", "yield"),
+            getattr(C, "SESSION_DATE_COLUMN_NAME", "session_date"),
+        ]
+        logger.info(
+            f"[DEBUG] قيم الأعمدة الأساسية في latest_data:\n{latest_data[debug_cols].to_string(index=False)}"
+        )
         is_duplicate, reason = data_store.is_duplicate_data(latest_data)
         if is_duplicate:
             if status_callback:
