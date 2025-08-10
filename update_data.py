@@ -566,7 +566,10 @@ def _process_update_result_blocking(updated: Optional[bool], db_adapter):
                     f"ℹ️ البيانات {status}{gap_status} | أحدث تاريخ: {latest_date}",
                 )
 
-                if log_level >= logging.WARNING:
+                if log_level >= logging.WARNING and datetime.now().weekday() in [
+                    3,
+                    6,
+                ]:  # الخميس والأحد فقط
                     _send_alert(
                         f"تحديث متأخر: البيانات محدثة حتى {latest_date} (مر {days_since_update} يوم دون تحديث){gap_status}",
                         severity=(
