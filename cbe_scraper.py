@@ -629,7 +629,7 @@ class CbeScraper(YieldDataSource):
                         )
                         # إذا كانت البيانات المخزنة مؤقتاً غير صالحة، احذفها من التخزين المؤقت
                         try:
-                            self.cache.delete(cache_key)
+                            self.cache.invalidate(cache_key)
                             logger.info(
                                 "🗑️ تم حذف البيانات غير الصالحة من التخزين المؤقت"
                             )
