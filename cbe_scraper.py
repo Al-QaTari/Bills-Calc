@@ -227,26 +227,70 @@ class CbeScraper(YieldDataSource):
 
             # معالجة التواريخ
             try:
+                # تحويل التواريخ من تنسيق dd/mm/yyyy إلى datetime
                 final_df["session_date_dt"] = pd.to_datetime(
                     final_df[session_date_col], format="%d/%m/%Y", errors="coerce"
                 )
 
-                date_col = getattr(C, "DATE_COLUMN_NAME", "date")
-                final_df[date_col] = (
-                    final_df["session_date_dt"]
-                    .dt.tz_localize(
-                        "Africa/Cairo", ambiguous="NaT", nonexistent="shift_forward"
+                # التحقق من وجود تواريخ صالحة
+                if final_df["session_date_dt"].isna().all():
+                    logger.error("❌ جميع التواريخ غير صالحة!")
+                    return None
+
+                # إزالة الصفوف التي تحتوي على تواريخ غير صالحة
+                final_df = final_df.dropna(subset=["session_date_dt"])
+
+                if final_df.empty:
+                    logger.error(
+                        "❌ لا توجد بيانات صالحة بعد إزالة التواريخ غير الصالحة"
                     )
-                    .dt.tz_convert("UTC")
-                )
+                    return None
+
+                date_col = getattr(C, "DATE_COLUMN_NAME", "date")
+
+                # تحويل التواريخ إلى UTC مع معالجة أفضل للأخطاء
+                try:
+                    final_df[date_col] = (
+                        final_df["session_date_dt"]
+                        .dt.tz_localize(
+                            "Africa/Cairo", ambiguous="NaT", nonexistent="shift_forward"
+                        )
+                        .dt.tz_convert("UTC")
+                    )
+                except Exception as tz_error:
+                    logger.warning(f"⚠️ خطأ في تحويل المنطقة الزمنية: {tz_error}")
+                    # استخدام UTC مباشرة إذا فشل التحويل
+                    final_df[date_col] = final_df["session_date_dt"].dt.tz_localize(
+                        "UTC"
+                    )
 
                 final_df = (
                     final_df.sort_values("session_date_dt", ascending=False)
                     .drop_duplicates(subset=[tenor_col])
                     .sort_values(by=tenor_col)
                 )
+
+                logger.info(f"✅ تم معالجة {len(final_df)} سجل بتاريخ صحيح")
+
+                # التحقق النهائي من صحة التواريخ قبل الإرجاع
+                if date_col in final_df.columns:
+                    invalid_dates = final_df[date_col].dt.year == 1970
+                    if invalid_dates.any():
+                        logger.error(
+                            f"❌ تم العثور على {invalid_dates.sum()} سجل بتاريخ غير صالح (1970)"
+                        )
+                        # إزالة السجلات ذات التواريخ غير الصالحة
+                        final_df = final_df[~invalid_dates]
+                        if final_df.empty:
+                            logger.error(
+                                "❌ لا توجد بيانات صالحة بعد إزالة التواريخ غير الصالحة"
+                            )
+                            return None
+                        logger.info(f"✅ تم الاحتفاظ بـ {len(final_df)} سجل صالح")
+
             except Exception as e:
-                logger.warning(f"⚠️ خطأ في معالجة التواريخ: {e}")
+                logger.error(f"❌ خطأ في معالجة التواريخ: {e}")
+                return None
 
             return final_df
 
