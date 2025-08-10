@@ -161,18 +161,29 @@ class SQLiteDBManager(HistoricalDataStore):
             # تحويل التواريخ إلى نص للحفظ
             df_to_save[C.DATE_COLUMN_NAME] = df_to_save[C.DATE_COLUMN_NAME].astype(str)
 
+        # حذف جميع الصفوف الخاصة بكل session_date في الدفعة الجديدة قبل الحفظ
+        session_dates = df_to_save[C.SESSION_DATE_COLUMN_NAME].unique().tolist()
         try:
             with self.engine.begin() as conn:
+                # حذف الصفوف القديمة لكل session_date (باستخدام placeholders مسماة)
+                placeholders = ",".join(
+                    [f":session_date_{i}" for i in range(len(session_dates))]
+                )
+                delete_sql = f'DELETE FROM "{C.TABLE_NAME}" WHERE "{C.SESSION_DATE_COLUMN_NAME}" IN ({placeholders})'
+                delete_params = {
+                    f"session_date_{i}": v for i, v in enumerate(session_dates)
+                }
+                conn.execute(text(delete_sql), delete_params)
+                # حفظ الصفوف الجديدة
                 records = df_to_save.to_dict("records")
-
                 conn.execute(
                     text(
                         f"""
-                        INSERT OR REPLACE INTO "{C.TABLE_NAME}" 
-                        ("{C.TENOR_COLUMN_NAME}", "{C.YIELD_COLUMN_NAME}", 
-                         "{C.SESSION_DATE_COLUMN_NAME}", "{C.DATE_COLUMN_NAME}")
+                        INSERT INTO \"{C.TABLE_NAME}\" 
+                        (\"{C.TENOR_COLUMN_NAME}\", \"{C.YIELD_COLUMN_NAME}\", 
+                         \"{C.SESSION_DATE_COLUMN_NAME}\", \"{C.DATE_COLUMN_NAME}\")
                         VALUES (:tenor, :yield, :session_date, :scrape_date)
-                    """
+                        """
                     ),
                     records,
                 )
@@ -447,58 +458,54 @@ class SQLiteDBManager(HistoricalDataStore):
         if new_data.empty:
             return False, "البيانات فارغة"
 
-        latest_session_date = new_data[C.SESSION_DATE_COLUMN_NAME].iloc[0]
+        session_dates = new_data[C.SESSION_DATE_COLUMN_NAME].unique().tolist()
 
         try:
             with self.engine.connect() as conn:
-                query = text(
-                    f"""
-                    SELECT * FROM "{C.TABLE_NAME}"
-                    WHERE "{C.SESSION_DATE_COLUMN_NAME}" = :session_date
-                    """
+                # جلب كل الصفوف من قاعدة البيانات حيث session_date IN (...)
+                placeholders = ",".join(
+                    [f":session_date_{i}" for i in range(len(session_dates))]
                 )
+                select_sql = f'SELECT * FROM "{C.TABLE_NAME}" WHERE "{C.SESSION_DATE_COLUMN_NAME}" IN ({placeholders})'
+                select_params = {
+                    f"session_date_{i}": v for i, v in enumerate(session_dates)
+                }
                 current_data = pd.read_sql_query(
-                    query, conn, params={"session_date": latest_session_date}
+                    text(select_sql), conn, params=select_params
                 )
 
                 if current_data.empty:
-                    return False, "لا توجد بيانات سابقة لهذا التاريخ"
+                    return False, "لا توجد بيانات سابقة لهذه التواريخ"
 
-                current_data = current_data.sort_values(by=C.TENOR_COLUMN_NAME)
-                new_data_sorted = new_data.sort_values(by=C.TENOR_COLUMN_NAME)
+                # قارن فقط الأعمدة الأساسية
+                cols_to_compare = [
+                    C.TENOR_COLUMN_NAME,
+                    C.YIELD_COLUMN_NAME,
+                    C.SESSION_DATE_COLUMN_NAME,
+                ]
+                current_data = current_data.sort_values(by=cols_to_compare).reset_index(
+                    drop=True
+                )
+                new_data_sorted = new_data.sort_values(by=cols_to_compare).reset_index(
+                    drop=True
+                )
 
                 if len(current_data) != len(new_data_sorted):
                     return (
                         False,
-                        f"عدد الآجال مختلف ({len(current_data)} مقابل {len(new_data_sorted)})",
+                        f"عدد الصفوف مختلف ({len(current_data)} مقابل {len(new_data_sorted)})",
                     )
 
-                tolerance = 0.001
-
-                current_yields = current_data[C.YIELD_COLUMN_NAME].values
-                new_yields = new_data_sorted[C.YIELD_COLUMN_NAME].values
-
-                differences = abs(current_yields - new_yields)
-                max_diff = differences.max()
-
-                if max_diff <= tolerance:
-                    return True, f"البيانات متطابقة مع هامش خطأ {max_diff:.6f}"
-                else:
-                    different_tenors = []
-                    for i, diff in enumerate(differences):
-                        if diff > tolerance:
-                            tenor = current_data[C.TENOR_COLUMN_NAME].iloc[i]
-                            old_yield = current_yields[i]
-                            new_yield = new_yields[i]
-                            different_tenors.append(
-                                f"{tenor} يوم: {old_yield:.4f}% → {new_yield:.4f}% (فرق: {diff:.4f}%)"
-                            )
-
-                    return (
-                        False,
-                        f"اختلاف في {len(different_tenors)} آجال: {', '.join(different_tenors[:3])}"
-                        + ("..." if len(different_tenors) > 3 else ""),
+                try:
+                    pd.testing.assert_frame_equal(
+                        current_data[cols_to_compare],
+                        new_data_sorted[cols_to_compare],
+                        check_dtype=False,
+                        atol=0.001,
                     )
+                    return True, "البيانات متطابقة تمامًا."
+                except AssertionError as e:
+                    return False, f"البيانات مختلفة: {str(e)}"
 
         except Exception as e:
             logger.error(f"فشل في تحليل البيانات المكررة: {str(e)}", exc_info=True)
