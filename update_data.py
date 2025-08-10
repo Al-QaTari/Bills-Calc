@@ -668,30 +668,68 @@ async def main(force_refresh: bool):
         logger.info(
             f"{'🔄' if force_refresh else '⏳'} جاري جلب البيانات {'مع تجاهل الكاش' if force_refresh else 'من الكاش'}..."
         )
+        logger.info("📊 سيتم التحقق من التكرار قبل الحفظ لتجنب البيانات المكررة")
 
         updated = None
         save_success = False
 
-        # ✅ تم التعديل هنا: منطق الحفظ في كل قواعد البيانات
-        for adapter in adapters:
-            try:
-                updated_result = await safe_fetch_and_update(
-                    scraper_adapter, adapter, force_refresh
+        # ✅ تم التعديل هنا: منطق الحفظ المحسن - يحفظ فقط في قاعدة بيانات واحدة أولاً للتحقق من التكرار
+        updated = None
+        save_success = False
+
+        # جرب أولاً مع أول قاعدة بيانات متاحة
+        primary_adapter = adapters[0]
+        try:
+            updated_result = await safe_fetch_and_update(
+                scraper_adapter, primary_adapter, force_refresh
+            )
+
+            if updated_result is True:
+                logger.info(
+                    f"✅ تم تحديث البيانات بنجاح في {type(primary_adapter).__name__}."
                 )
-                logger.info(f"✅ تم تحديث البيانات بنجاح في {type(adapter).__name__}.")
-                if updated_result is True:
-                    updated = True
-                # ✅ تم التعديل هنا: يجب تعيين updated على False إذا كانت البيانات مكررة
-                elif updated_result is False:
-                    updated = False
+                updated = True
                 save_success = True
-            except Exception as e:
-                logger.error(
-                    f"❌ فشل الحفظ في {type(adapter).__name__}: {e}", exc_info=True
+
+                # إذا تم التحديث بنجاح، احفظ في باقي قواعد البيانات
+                for adapter in adapters[1:]:
+                    try:
+                        await safe_fetch_and_update(
+                            scraper_adapter, adapter, force_refresh
+                        )
+                        logger.info(
+                            f"✅ تم تحديث البيانات في {type(adapter).__name__} أيضاً."
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"❌ فشل الحفظ في {type(adapter).__name__}: {e}",
+                            exc_info=True,
+                        )
+
+            elif updated_result is False:
+                logger.info(
+                    f"ℹ️ البيانات مكررة في {type(primary_adapter).__name__} - لا حاجة للتحديث."
                 )
+                updated = False
+                save_success = True
+
+                # إذا كانت البيانات مكررة، لا نحتاج لحفظها في باقي قواعد البيانات
+
+            else:
+                logger.error(
+                    f"❌ فشل في تحديث البيانات في {type(primary_adapter).__name__}."
+                )
+                save_success = False
+
+        except Exception as e:
+            logger.error(
+                f"❌ فشل الحفظ في {type(primary_adapter).__name__}: {e}", exc_info=True
+            )
+            save_success = False
 
         if updated:
             # ✅ تم التعديل: نمرر أول adapter متاح للمراجعة
+            logger.info("🎉 تم تحديث البيانات بنجاح!")
             await asyncio.to_thread(
                 _process_update_result_blocking, updated, adapters[0]
             )
@@ -699,6 +737,7 @@ async def main(force_refresh: bool):
             raise RuntimeError("❌ فشل الحفظ في جميع قواعد البيانات المتاحة.")
         else:
             # إذا لم يتم التحديث فعليًا (البيانات مكررة)، نستخدم أي محول متاح للتحقق
+            logger.info("ℹ️ البيانات لم تتغير - لا حاجة للتحديث")
             await asyncio.to_thread(
                 _process_update_result_blocking, updated, adapters[0]
             )
