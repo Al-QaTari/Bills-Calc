@@ -545,12 +545,13 @@ class CbeScraper(YieldDataSource):
         التحقق من صحة التواريخ في البيانات المخزنة مؤقتاً وإزالة السجلات غير الصالحة.
         """
         try:
-            date_col = getattr(C, "DATE_COLUMN_NAME", "date")
+            date_col = getattr(C, "DATE_COLUMN_NAME", "scrape_date")
 
             if date_col not in df.columns:
                 logger.warning(
                     f"⚠️ عمود التاريخ '{date_col}' غير موجود في البيانات المخزنة مؤقتاً"
                 )
+                logger.info(f"الأعمدة الموجودة: {list(df.columns)}")
                 return None
 
             # تحويل التواريخ إلى datetime للفحص
