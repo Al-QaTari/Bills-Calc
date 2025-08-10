@@ -540,6 +540,53 @@ class CbeScraper(YieldDataSource):
             logger.error(f"❌ خطأ في حساب التجزئة: {e}")
             return ""
 
+    def _validate_cached_dates(self, df: pd.DataFrame) -> Optional[pd.DataFrame]:
+        """
+        التحقق من صحة التواريخ في البيانات المخزنة مؤقتاً وإزالة السجلات غير الصالحة.
+        """
+        try:
+            date_col = getattr(C, "DATE_COLUMN_NAME", "date")
+
+            if date_col not in df.columns:
+                logger.warning(
+                    f"⚠️ عمود التاريخ '{date_col}' غير موجود في البيانات المخزنة مؤقتاً"
+                )
+                return None
+
+            # تحويل التواريخ إلى datetime للفحص
+            date_series = pd.to_datetime(df[date_col], errors="coerce")
+
+            # التحقق من وجود تواريخ غير صالحة (1970-01-01 أو NaT)
+            invalid_dates = (date_series.dt.year == 1970) | date_series.isna()
+
+            if invalid_dates.any():
+                invalid_count = invalid_dates.sum()
+                total_count = len(df)
+                logger.warning(
+                    f"⚠️ تم العثور على {invalid_count} سجل بتاريخ غير صالح من أصل {total_count} في التخزين المؤقت"
+                )
+
+                # إزالة السجلات ذات التواريخ غير الصالحة
+                valid_data = df[~invalid_dates].copy()
+
+                if valid_data.empty:
+                    logger.error(
+                        "❌ لا توجد بيانات صالحة في التخزين المؤقت بعد إزالة التواريخ غير الصالحة"
+                    )
+                    return None
+
+                logger.info(
+                    f"✅ تم الاحتفاظ بـ {len(valid_data)} سجل صالح من التخزين المؤقت"
+                )
+                return valid_data
+            else:
+                logger.info(f"✅ جميع التواريخ في التخزين المؤقت صالحة ({len(df)} سجل)")
+                return df
+
+        except Exception as e:
+            logger.error(f"❌ خطأ في التحقق من صحة التواريخ في التخزين المؤقت: {e}")
+            return None
+
     async def get_historical_data_for_gaps(
         self, gaps: List[Dict[str, Any]]
     ) -> pd.DataFrame:
@@ -568,7 +615,28 @@ class CbeScraper(YieldDataSource):
                 cached_data = self.cache.get(cache_key)
                 if cached_data is not None and not cached_data.empty:
                     logger.info("✅ تم العثور على البيانات في التخزين المؤقت.")
-                    return cached_data
+
+                    # التحقق من صحة التواريخ في البيانات المخزنة مؤقتاً
+                    validated_data = self._validate_cached_dates(cached_data)
+                    if validated_data is not None and not validated_data.empty:
+                        logger.info(
+                            f"✅ تم التحقق من صحة {len(validated_data)} سجل من التخزين المؤقت"
+                        )
+                        return validated_data
+                    else:
+                        logger.warning(
+                            "⚠️ البيانات المخزنة مؤقتاً تحتوي على تواريخ غير صالحة، سيتم إعادة الاستخراج"
+                        )
+                        # إذا كانت البيانات المخزنة مؤقتاً غير صالحة، احذفها من التخزين المؤقت
+                        try:
+                            self.cache.delete(cache_key)
+                            logger.info(
+                                "🗑️ تم حذف البيانات غير الصالحة من التخزين المؤقت"
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                f"⚠️ خطأ في حذف البيانات غير الصالحة من التخزين المؤقت: {e}"
+                            )
             except Exception as e:
                 logger.warning(f"⚠️ خطأ في قراءة التخزين المؤقت: {e}")
 
