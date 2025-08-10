@@ -91,11 +91,29 @@ class PostgresDBManager(HistoricalDataStore):
                 C.DATE_COLUMN_NAME
             ].dt.tz_convert("UTC")
 
+        # DEBUG: طباعة عدد الصفوف وقيم الأعمدة الأساسية قبل الحفظ
+        debug_cols = [
+            C.TENOR_COLUMN_NAME,
+            C.YIELD_COLUMN_NAME,
+            C.SESSION_DATE_COLUMN_NAME,
+        ]
+        logger.info(f"[DEBUG] سيتم حفظ {len(df_to_save)} صف في PostgreSQL:")
+        logger.info(f"[DEBUG] القيم:\n{df_to_save[debug_cols].to_string(index=False)}")
+
+        session_dates = df_to_save[C.SESSION_DATE_COLUMN_NAME].unique().tolist()
         records = df_to_save.to_dict("records")
 
         try:
             with self._get_connection() as conn:
                 with conn.begin():
+                    # حذف الصفوف القديمة لكل session_date
+                    conn.execute(
+                        text(
+                            f'DELETE FROM "{C.TABLE_NAME}" WHERE "{C.SESSION_DATE_COLUMN_NAME}" IN :session_dates'
+                        ),
+                        {"session_dates": tuple(session_dates)},
+                    )
+                    # حفظ الصفوف الجديدة
                     conn.execute(
                         text(
                             f"""
@@ -103,10 +121,6 @@ class PostgresDBManager(HistoricalDataStore):
                             ("{C.TENOR_COLUMN_NAME}", "{C.YIELD_COLUMN_NAME}", 
                              "{C.SESSION_DATE_COLUMN_NAME}", "{C.DATE_COLUMN_NAME}")
                             VALUES (:tenor, :yield, :session_date, :date)
-                            ON CONFLICT ("{C.TENOR_COLUMN_NAME}", "{C.SESSION_DATE_COLUMN_NAME}")
-                            DO UPDATE SET 
-                                "{C.YIELD_COLUMN_NAME}" = EXCLUDED."{C.YIELD_COLUMN_NAME}",
-                                "{C.DATE_COLUMN_NAME}" = EXCLUDED."{C.DATE_COLUMN_NAME}";
                             """
                         ),
                         [
@@ -399,38 +413,48 @@ class PostgresDBManager(HistoricalDataStore):
         if new_data.empty:
             return False, "البيانات فارغة"
 
-        latest_session_date = new_data[C.SESSION_DATE_COLUMN_NAME].iloc[0]
+        session_dates = new_data[C.SESSION_DATE_COLUMN_NAME].unique().tolist()
 
         try:
             with self._get_connection() as conn:
-                query = text(
-                    f'SELECT * FROM "{C.TABLE_NAME}" WHERE "{C.SESSION_DATE_COLUMN_NAME}" = :session_date'
+                # جلب كل الصفوف من قاعدة البيانات حيث session_date IN (...)
+                placeholders = ",".join(
+                    [f":session_date_{i}" for i in range(len(session_dates))]
                 )
+                select_sql = f'SELECT * FROM "{C.TABLE_NAME}" WHERE "{C.SESSION_DATE_COLUMN_NAME}" IN ({placeholders})'
+                select_params = {
+                    f"session_date_{i}": v for i, v in enumerate(session_dates)
+                }
                 current_data = pd.read_sql_query(
-                    query, conn, params={"session_date": latest_session_date}
+                    text(select_sql), conn, params=select_params
                 )
 
                 if current_data.empty:
-                    return False, "لا توجد بيانات سابقة لهذا التاريخ"
+                    return False, "لا توجد بيانات سابقة لهذه التواريخ"
 
-                current_data = current_data.sort_values(
-                    by=C.TENOR_COLUMN_NAME
-                ).reset_index(drop=True)
-                new_data_sorted = new_data.sort_values(
-                    by=C.TENOR_COLUMN_NAME
-                ).reset_index(drop=True)
+                # قارن فقط الأعمدة الأساسية
+                cols_to_compare = [
+                    C.TENOR_COLUMN_NAME,
+                    C.YIELD_COLUMN_NAME,
+                    C.SESSION_DATE_COLUMN_NAME,
+                ]
+                current_data = current_data.sort_values(by=cols_to_compare).reset_index(
+                    drop=True
+                )
+                new_data_sorted = new_data.sort_values(by=cols_to_compare).reset_index(
+                    drop=True
+                )
 
                 if len(current_data) != len(new_data_sorted):
                     return (
                         False,
-                        f"عدد الآجال مختلف ({len(current_data)} مقابل {len(new_data_sorted)})",
+                        f"عدد الصفوف مختلف ({len(current_data)} مقابل {len(new_data_sorted)})",
                     )
 
-                # استخدام pandas.testing للمقارنة الدقيقة
                 try:
                     pd.testing.assert_frame_equal(
-                        current_data[[C.TENOR_COLUMN_NAME, C.YIELD_COLUMN_NAME]],
-                        new_data_sorted[[C.TENOR_COLUMN_NAME, C.YIELD_COLUMN_NAME]],
+                        current_data[cols_to_compare],
+                        new_data_sorted[cols_to_compare],
                         check_dtype=False,
                         atol=0.001,
                     )
