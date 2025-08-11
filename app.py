@@ -2,6 +2,29 @@ import os
 import subprocess
 import logging
 from pathlib import Path
+import streamlit as st
+import sentry_sdk
+from dotenv import load_dotenv
+import time
+from typing import Tuple
+
+from dependency_container import container
+from db_manager import get_db_manager
+
+from utils import (
+    setup_logging,
+    prepare_arabic_text,
+    load_css,
+    StateManager,
+)
+from treasury_core.ports import HistoricalDataStore, YieldDataSource
+from ui.home_page import render_home_page
+from ui.primary_yield_calculator import render_primary_yield_calculator
+from ui.secondary_sale_calculator import render_secondary_sale_calculator
+from ui.historical_data_view import render_historical_data_view
+from ui.help_page import render_help_page
+from secret_admin_panel import render_secret_admin_panel
+from error_handler import suppress_websocket_errors  # Moved this import to the top
 
 # تحديد مسار Playwright browsers path
 PLAYWRIGHT_PATH = os.environ.get(
@@ -44,33 +67,6 @@ Treasury Bills Calculator - Main Application
 This module contains the main Streamlit application for calculating
 treasury bills yields and secondary market values.
 """
-
-import os
-import logging
-import streamlit as st
-import sentry_sdk
-from dotenv import load_dotenv
-import subprocess
-import time
-from typing import Tuple
-
-from dependency_container import container  # ✅ تم إعادة هذا الاستيراد
-from db_manager import get_db_manager  # ✅ تم استيراد الدالة المعدلة
-
-from utils import (
-    setup_logging,
-    prepare_arabic_text,
-    load_css,
-    StateManager,
-)
-from treasury_core.ports import HistoricalDataStore, YieldDataSource
-from ui.home_page import render_home_page
-from ui.primary_yield_calculator import render_primary_yield_calculator
-from ui.secondary_sale_calculator import render_secondary_sale_calculator
-from ui.historical_data_view import render_historical_data_view
-from ui.help_page import render_help_page
-from secret_admin_panel import render_secret_admin_panel
-from error_handler import suppress_websocket_errors
 
 # Load environment variables
 load_dotenv()
