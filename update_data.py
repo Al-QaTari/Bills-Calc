@@ -11,6 +11,7 @@ import logging
 import os
 import platform
 import sys
+import subprocess
 from datetime import datetime, timedelta, time
 from html import escape
 from pathlib import Path
@@ -641,10 +642,49 @@ def _check_and_send_telegram_alerts_blocking(db_adapter):
 
 
 # ---------------------------
+# دالة لضمان تثبيت Playwright
+# ---------------------------
+def _ensure_playwright_is_installed_for_cron():
+    """
+    تضمن تثبيت متصفح Playwright. هذا ضروري للبيئات التي لا يمكن التحكم فيها مثل مهام cron.
+    """
+    try:
+        logger.info(
+            "Ensuring Playwright browser is installed for the cron job (no-deps)..."
+        )
+        # لا نستخدم --with-deps لأن البيئة لا تسمح بـ sudo
+        result = subprocess.run(
+            ["playwright", "install", "chromium"],
+            capture_output=True,
+            text=True,
+            timeout=300,  # 5 دقائق
+            check=False,
+        )
+        if result.returncode == 0:
+            logger.info("✅ Playwright browser installed/verified successfully.")
+            return True
+        else:
+            logger.warning(
+                f"Playwright install command finished with code {result.returncode}."
+            )
+            logger.warning(f"STDOUT: {result.stdout}")
+            logger.error(f"STDERR: {result.stderr}")
+            return False
+    except Exception as e:
+        logger.error(
+            f"❌ An unexpected error occurred during Playwright setup: {e}",
+            exc_info=True,
+        )
+        return False
+
+
+# ---------------------------
 # الدالة الرئيسية (async)
 # ---------------------------
 async def main(force_refresh: bool):
     """الدالة الرئيسية للتحديث (async)"""
+    # الخطوة الأولى: التأكد من تثبيت المتصفح
+    _ensure_playwright_is_installed_for_cron()
     if not CUSTOM_MODULES_AVAILABLE:
         logger.error(
             f"❌ لا يمكن تشغيل السكريبت بدون المكتبات المطلوبة: {getattr(missing_custom_modules_error, 'args', missing_custom_modules_error)}"
