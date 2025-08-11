@@ -651,6 +651,7 @@ def _ensure_playwright_is_installed_for_cron():
     try:
         # تحقق سريع: هل الأمر موجود؟
         import shutil
+
         if shutil.which("playwright"):
             logger.info("Playwright command found.")
         else:
@@ -663,27 +664,35 @@ def _ensure_playwright_is_installed_for_cron():
             capture_output=True,
             text=True,
             timeout=300,  # 5 دقائق
-            check=False, # لا تطلق استثناء عند الفشل، بل تحقق من الكود
+            check=False,  # لا تطلق استثناء عند الفشل، بل تحقق من الكود
         )
         if result.returncode == 0:
             logger.info("✅ Playwright browser installed/verified successfully.")
             return True
         else:
             # قد يكون مثبتًا بالفعل ولكن الأمر فشل لسبب ما، لا يزال يجب المتابعة
-            logger.warning(f"Playwright install command finished with code {result.returncode}.")
+            logger.warning(
+                f"Playwright install command finished with code {result.returncode}."
+            )
             logger.warning(f"STDOUT: {result.stdout}")
             logger.error(f"STDERR: {result.stderr}")
             # لا تفشل بشكل كامل، فقط سجل التحذير
             return False
     except FileNotFoundError:
-        logger.error("❌ 'playwright' command not found. Is Playwright installed in this environment?")
+        logger.error(
+            "❌ 'playwright' command not found. Is Playwright installed in this environment?"
+        )
         return False
     except subprocess.TimeoutExpired:
         logger.error("❌ Timeout expired while trying to install Playwright browser.")
         return False
     except Exception as e:
-        logger.error(f"❌ An unexpected error occurred during Playwright setup: {e}", exc_info=True)
+        logger.error(
+            f"❌ An unexpected error occurred during Playwright setup: {e}",
+            exc_info=True,
+        )
         return False
+
 
 # ---------------------------
 # الدالة الرئيسية (async)
