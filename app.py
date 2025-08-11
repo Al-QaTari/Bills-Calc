@@ -1,3 +1,42 @@
+import os
+import subprocess
+import logging
+from pathlib import Path
+
+# تحديد مسار Playwright browsers path
+PLAYWRIGHT_PATH = os.environ.get(
+    "PLAYWRIGHT_BROWSERS_PATH",
+    str(Path.home() / ".cache" / "ms-playwright"),
+)
+
+
+def chromium_installed() -> bool:
+    """يتأكد إذا كان Chromium متثبت."""
+    browsers_dir = Path(PLAYWRIGHT_PATH)
+    if not browsers_dir.exists():
+        return False
+    # البحث عن أي مجلد يبدأ بـ 'chromium-'
+    for folder in browsers_dir.iterdir():
+        if folder.is_dir() and folder.name.startswith("chromium-"):
+            chrome_exec = folder / "chrome-linux" / "chrome"
+            if chrome_exec.exists():
+                return True
+    return False
+
+
+# تثبيت Chromium إذا مش موجود
+if not chromium_installed():
+    logging.warning("⚠️ Chromium not found, installing via Playwright...")
+    try:
+        subprocess.run(
+            ["python", "-m", "playwright", "install", "--with-deps", "chromium"],
+            check=True,
+        )
+        logging.info("✅ Chromium installed successfully!")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"❌ Failed to install Chromium: {e}")
+
+
 """
 Treasury Bills Calculator - Main Application
 حاسبة أذون الخزانة - التطبيق الرئيسي
