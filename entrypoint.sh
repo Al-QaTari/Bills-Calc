@@ -23,7 +23,9 @@ exec gosu appuser bash -c '
   set -e
   echo "--> Now running as user: $(whoami)"
   
-  echo "--> Playwright browser should be pre-installed in the Docker image."
+  echo "--> Installing Playwright browser at runtime..."
+  python -m playwright install --with-deps chromium
+  echo "--> Playwright setup complete."
   echo "------------------------------------------------------------"
   
   echo "🚀 Executing main command: $@"
