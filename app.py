@@ -11,7 +11,6 @@ import logging
 import streamlit as st
 import sentry_sdk
 from dotenv import load_dotenv
-import subprocess
 import time
 from typing import Tuple
 
@@ -55,93 +54,6 @@ if sentry_dsn:
         traces_sample_rate=1.0,
         environment=sentry_env,
     )
-
-
-def ensure_playwright_browsers_installed():
-    """Ensure Playwright browsers are installed for web scraping."""
-    try:
-        import os
-
-        # Check if we're on Windows and handle accordingly
-        if os.name == "nt":  # Windows
-            logging.info("🪟 Windows detected, using alternative Playwright setup")
-            return _ensure_playwright_windows()
-        else:
-            return _ensure_playwright_unix()
-
-    except Exception as e:
-        logging.error(f"❌ Error ensuring Playwright browsers: {str(e)}")
-        return False
-
-
-def _ensure_playwright_windows():
-    """Windows-specific Playwright browser installation."""
-    try:
-        import sys
-
-        # Try to install browsers directly without checking first
-        logging.info("🔧 Installing Playwright browsers on Windows...")
-
-        # Use python -m playwright install to avoid subprocess issues
-        result = subprocess.run(
-            [sys.executable, "-m", "playwright", "install", "chromium"],
-            capture_output=True,
-            text=True,
-            timeout=300,  # 5 minutes timeout
-            shell=True,  # Use shell on Windows
-        )
-
-        if result.returncode == 0:
-            logging.info("✅ Playwright browsers installed successfully on Windows")
-            return True
-        else:
-            logging.warning(f"⚠️ Playwright installation warning: {result.stderr}")
-            # Don't fail completely, just warn
-            return True
-
-    except Exception as e:
-        logging.warning(f"⚠️ Playwright setup warning on Windows: {str(e)}")
-        return True  # Continue anyway
-
-
-def _ensure_playwright_unix():
-    """Unix-specific Playwright browser installation."""
-    try:
-        from playwright.sync_api import sync_playwright
-
-        # Check if browsers are installed
-        with sync_playwright() as p:
-            try:
-                # Try to launch browser to check if it's installed
-                browser = p.chromium.launch(headless=True)
-                browser.close()
-                logging.info("✅ Playwright browsers are already installed")
-                return True
-            except Exception as e:
-                logging.warning(f"Playwright browsers not found: {str(e)}")
-
-        # Install browsers if not found
-        logging.info("🔧 Installing Playwright browsers...")
-        result = subprocess.run(
-            ["playwright", "install", "chromium"],
-            capture_output=True,
-            text=True,
-            timeout=300,  # 5 minutes timeout
-        )
-
-        if result.returncode == 0:
-            logging.info("✅ Playwright browsers installed successfully")
-            return True
-        else:
-            logging.error(f"❌ Failed to install Playwright browsers: {result.stderr}")
-            return False
-
-    except ImportError:
-        logging.warning("⚠️ Playwright not installed, skipping browser installation")
-        return False
-    except Exception as e:
-        logging.error(f"❌ Error ensuring Playwright browsers: {str(e)}")
-        return False
 
 
 # ✅ تم التعديل: إعادة دالة get_db_manager_with_info لتنفيذ المنطق المعدل
@@ -221,12 +133,8 @@ def main():
         placeholder.empty()
         st.session_state["db_message_shown"] = True
 
-    # Ensure Playwright browsers are installed
-    try:
-        ensure_playwright_browsers_installed()
-    except Exception as e:
-        logging.warning(f"Playwright browser installation warning: {str(e)}")
-        # Continue without Playwright if installation fails
+    # The Playwright browser is installed via the entrypoint.sh script in the Docker container.
+    # No need to run installation logic here.
 
     # Load CSS styles
     try:
