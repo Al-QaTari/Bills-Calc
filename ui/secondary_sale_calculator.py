@@ -155,8 +155,9 @@ def render_secondary_sale_calculator():
             key="use_latest_original",
         )
 
-    today = datetime(2025, 8, 3)
-    purchase_date = datetime(2025, 7, 4)
+    # --- حساب التواريخ ديناميكيًا ---
+    purchase_date = datetime.now()
+    sale_date = purchase_date + timedelta(days=holding_days)
     maturity_date = purchase_date + timedelta(days=original_tenor)
 
     st.markdown(
@@ -168,7 +169,7 @@ def render_secondary_sale_calculator():
             </div>
             <div class="date-card">
                 <div class="date-title">تاريخ البيع</div>
-                <div class="date-value">{today.strftime('%d-%m-%Y')}</div>
+                <div class="date-value">{sale_date.strftime('%d-%m-%Y')}</div>
             </div>
             <div class="date-card">
                 <div class="date-title">تاريخ الاستحقاق</div>
