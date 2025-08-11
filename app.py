@@ -1,15 +1,22 @@
+"""
+Treasury Bills Calculator - Main Application
+حاسبة أذون الخزانة - التطبيق الرئيسي
+
+This module contains the main Streamlit application for calculating
+treasury bills yields and secondary market values.
+"""
+
 import os
-import subprocess
 import logging
-from pathlib import Path
 import streamlit as st
 import sentry_sdk
 from dotenv import load_dotenv
+import subprocess
 import time
 from typing import Tuple
 
-from dependency_container import container
-from db_manager import get_db_manager
+from dependency_container import container  # ✅ تم إعادة هذا الاستيراد
+from db_manager import get_db_manager  # ✅ تم استيراد الدالة المعدلة
 
 from utils import (
     setup_logging,
@@ -24,49 +31,7 @@ from ui.secondary_sale_calculator import render_secondary_sale_calculator
 from ui.historical_data_view import render_historical_data_view
 from ui.help_page import render_help_page
 from secret_admin_panel import render_secret_admin_panel
-from error_handler import suppress_websocket_errors  # Moved this import to the top
-
-# تحديد مسار Playwright browsers path
-PLAYWRIGHT_PATH = os.environ.get(
-    "PLAYWRIGHT_BROWSERS_PATH",
-    str(Path.home() / ".cache" / "ms-playwright"),
-)
-
-
-def chromium_installed() -> bool:
-    """يتأكد إذا كان Chromium متثبت."""
-    browsers_dir = Path(PLAYWRIGHT_PATH)
-    if not browsers_dir.exists():
-        return False
-    # البحث عن أي مجلد يبدأ بـ 'chromium-'
-    for folder in browsers_dir.iterdir():
-        if folder.is_dir() and folder.name.startswith("chromium-"):
-            chrome_exec = folder / "chrome-linux" / "chrome"
-            if chrome_exec.exists():
-                return True
-    return False
-
-
-# تثبيت Chromium إذا مش موجود
-if not chromium_installed():
-    logging.warning("⚠️ Chromium not found, installing via Playwright...")
-    try:
-        subprocess.run(
-            ["python", "-m", "playwright", "install", "--with-deps", "chromium"],
-            check=True,
-        )
-        logging.info("✅ Chromium installed successfully!")
-    except subprocess.CalledProcessError as e:
-        logging.error(f"❌ Failed to install Chromium: {e}")
-
-
-"""
-Treasury Bills Calculator - Main Application
-حاسبة أذون الخزانة - التطبيق الرئيسي
-
-This module contains the main Streamlit application for calculating
-treasury bills yields and secondary market values.
-"""
+from error_handler import suppress_websocket_errors
 
 # Load environment variables
 load_dotenv()
