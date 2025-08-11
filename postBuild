@@ -1,26 +1,4 @@
 #!/bin/bash
-# ================================================================
-# postBuild for Streamlit Cloud - Install Playwright Chromium
-# ================================================================
-
-echo "🔧 Setting up Treasury Bills Calculator..."
-
-# Upgrade pip just in case
-pip install --upgrade pip
-
-# Install project dependencies
-pip install -r requirements.txt
-
-# Install Playwright browsers
-echo "📦 Installing Playwright browsers..."
-playwright install --with-deps chromium
-
-# Verify installation
-echo "✅ Playwright browsers installed successfully"
-playwright --version
-python -m playwright --version
-
-# Set environment variables for better performance
-export PYTHONPATH="${PYTHONPATH}:${PWD}"
-
-echo "🚀 Setup completed successfully!"
+set -e
+echo "Installing Playwright browsers..."
+python -m playwright install chromium
