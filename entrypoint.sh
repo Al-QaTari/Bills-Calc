@@ -23,9 +23,9 @@ exec gosu appuser bash -c '
   set -e
   echo "--> Now running as user: $(whoami)"
   
-  echo "--> Installing Playwright browser at runtime..."
-  python -m playwright install --with-deps chromium
-  echo "--> Playwright setup complete."
+  echo "--> Installing Playwright browser at runtime (dependencies are in packages.txt)..."
+  python -m playwright install chromium
+  echo "--> Playwright browser installation complete."
   echo "------------------------------------------------------------"
   
   echo "🚀 Executing main command: $@"
