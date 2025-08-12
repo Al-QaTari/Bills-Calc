@@ -1,63 +1,84 @@
-# ui/secondary_sale_calculator.py
-import streamlit as st
-from factories import InputModelFactory
-from treasury_core.calculations import analyze_secondary_sale
-from utils import prepare_arabic_text, format_currency
-from state_manager import Repository
-from treasury_core.models import SecondarySaleResult
-import constants as C
+# -*- coding: utf-8 -*-
+"""
+Streamlit UI module for the Secondary Sale Calculator.
+
+This module provides the user interface to analyze the secondary market sale
+of treasury bills, calculating potential profits or losses based on various inputs.
+"""
+
 from datetime import datetime, timedelta
 
+import streamlit as st
+
+import constants as C
+from factories import InputModelFactory
+from state_manager import Repository
+from treasury_core.calculations import analyze_secondary_sale
+from treasury_core.models import SecondarySaleResult
+from utils import format_currency, prepare_arabic_text
+
+# Initialize a repository to persist secondary sale results in the session state
 secondary_results_repo = Repository[SecondarySaleResult]("secondary_sale")
 
 
-def display_secondary_results(
-    result: SecondarySaleResult,
-    face_value: float,
-    original_yield: float,
-    original_tenor: int,
-    tax_rate: float,
-    secondary_yield: float = None,
-):
-    """عرض نتائج تحليل البيع الثانوي."""
+def display_secondary_results(result: SecondarySaleResult):
+    """
+    Displays the results of the secondary sale analysis in styled metric cards.
+
+    Args:
+        result: The SecondarySaleResult object containing calculation outputs.
+    """
     st.markdown(
-        "<div class='card--section-header'><h2 class='section-title'>نتائج تحليل البيع الثانوي</h2></div>",
+        "<div class='card--section-header'><h2 class='section-title'>"
+        "نتائج تحليل البيع الثانوي</h2></div>",
         unsafe_allow_html=True,
     )
 
-    # Row 1
+    # Row 1: Purchase Price, Sale Price, Gross Profit
     col1, col2, col3 = st.columns(3)
     with col1:
         st.markdown(
-            f"<div class='metric-card blue'><span class='metric-title'>سعر الشراء الأصلي</span><span class='metric-value'>{format_currency(result.original_purchase_price)}</span></div>",
+            f"<div class='metric-card blue'><span class='metric-title'>"
+            f"سعر الشراء الأصلي</span><span class='metric-value'>"
+            f"{format_currency(result.original_purchase_price)}</span></div>",
             unsafe_allow_html=True,
         )
     with col2:
         st.markdown(
-            f"<div class='metric-card yellow'><span class='metric-title'>سعر البيع الثانوي</span><span class='metric-value'>{format_currency(result.sale_price)}</span></div>",
+            f"<div class='metric-card yellow'><span class='metric-title'>"
+            f"سعر البيع الثانوي</span><span class='metric-value'>"
+            f"{format_currency(result.sale_price)}</span></div>",
             unsafe_allow_html=True,
         )
     with col3:
         st.markdown(
-            f"<div class='metric-card green-dark'><span class='metric-title'>الربح/الخسارة الإجمالية</span><span class='metric-value'>{format_currency(result.gross_profit)}</span></div>",
+            f"<div class='metric-card green-dark'><span class='metric-title'>"
+            f"الربح/الخسارة الإجمالية</span><span class='metric-value'>"
+            f"{format_currency(result.gross_profit)}</span></div>",
             unsafe_allow_html=True,
         )
 
-    # Row 2
+    # Row 2: Tax, Net Profit, Period Yield
     col4, col5, col6 = st.columns(3)
     with col4:
         st.markdown(
-            f"<div class='metric-card red'><span class='metric-title'>الضريبة المستحقة</span><span class='metric-value'>{format_currency(result.tax_amount)}</span></div>",
+            f"<div class='metric-card red'><span class='metric-title'>"
+            f"الضريبة المستحقة</span><span class='metric-value'>"
+            f"{format_currency(result.tax_amount)}</span></div>",
             unsafe_allow_html=True,
         )
     with col5:
         st.markdown(
-            f"<div class='metric-card green-light'><span class='metric-title'>صافي الربح/الخسارة</span><span class='metric-value'>{format_currency(result.net_profit)}</span></div>",
+            f"<div class='metric-card green-light'><span class='metric-title'>"
+            f"صافي الربح/الخسارة</span><span class='metric-value'>"
+            f"{format_currency(result.net_profit)}</span></div>",
             unsafe_allow_html=True,
         )
     with col6:
         st.markdown(
-            f"<div class='metric-card cyan'><span class='metric-title'>نسبة العائد للفترة</span><span class='metric-value'>{result.period_yield:.2f}%</span></div>",
+            f"<div class='metric-card cyan'><span class='metric-title'>"
+            f"نسبة العائد للفترة</span><span class='metric-value'>"
+            f"{result.period_yield:.2f}%</span></div>",
             unsafe_allow_html=True,
         )
 
@@ -67,16 +88,12 @@ def display_secondary_results(
 
 
 def render_secondary_sale_calculator():
-    """عرض حاسبة تحليل البيع الثانوي"""
+    """Renders the secondary sale calculator interface and handles user interactions."""
     with st.container():
-        # --- تعريف متغير use_latest_original في البداية ---
-        df_data = st.session_state.get("df_data", None)
-        if "use_latest_original" in st.session_state:
-            use_latest_original = st.session_state["use_latest_original"]
-        else:
-            use_latest_original = False
+        df_data = st.session_state.get("df_data")
+        use_latest_original = st.session_state.get("use_latest_original", False)
 
-        # الصف الأول: القيمة الاسمية | معدل العائد الأصلي | أجل الإذن الأصلي
+        # --- Input Fields ---
         row1_col1, row1_col2, row1_col3 = st.columns(3)
         with row1_col1:
             face_value = st.number_input(
@@ -93,19 +110,16 @@ def render_secondary_sale_calculator():
                 [91, 182, 273, 364],
                 key="sec_tenor",
             )
+
         with row1_col2:
-            # حساب قيمة العائد الأصلي بناءً على الخيار
+            original_yield_value = st.session_state.get("sec_orig_yield", 25.0)
             if use_latest_original and df_data is not None and not df_data.empty:
                 filtered_df = df_data[df_data[C.TENOR_COLUMN_NAME] == original_tenor]
-                original_yield_value = (
-                    float(filtered_df[C.YIELD_COLUMN_NAME].iloc[0])
-                    if not filtered_df.empty
-                    else 25.0
-                )
-            else:
-                original_yield_value = st.session_state.get("sec_orig_yield", 25.0)
+                if not filtered_df.empty:
+                    original_yield_value = float(
+                        filtered_df[C.YIELD_COLUMN_NAME].iloc[0]
+                    )
 
-            # إدخال معدل العائد الأصلي
             original_yield = st.number_input(
                 prepare_arabic_text("معدل العائد الأصلي (%)"),
                 min_value=1.0,
@@ -116,7 +130,6 @@ def render_secondary_sale_calculator():
                 disabled=use_latest_original,
             )
 
-        # الصف الثاني: عدد أيام الاحتفاظ | معدل الضريبة | معدل العائد الثانوي
         row2_col1, row2_col2, row2_col3 = st.columns(3)
         with row2_col1:
             max_holding = original_tenor - 1
@@ -146,19 +159,18 @@ def render_secondary_sale_calculator():
                 format="%.3f",
                 key="sec_sec_yield",
             )
-        st.markdown("</div>", unsafe_allow_html=True)
 
-        # --- زر استخدام أحدث عائد متاح أسفل المربعات ---
         use_latest_original = st.checkbox(
             prepare_arabic_text("استخدام أحدث عائد متاح"),
             value=use_latest_original,
             key="use_latest_original",
         )
 
-    # --- حساب التواريخ ديناميكيًا ---
-    purchase_date = datetime.now()
-    sale_date = purchase_date + timedelta(days=holding_days)
-    maturity_date = purchase_date + timedelta(days=original_tenor)
+    # --- Dynamic Date Calculation (Updated Logic) ---
+    sale_date = datetime.now()
+    purchase_date = sale_date - timedelta(days=holding_days)
+    remaining_days = original_tenor - holding_days
+    maturity_date = sale_date + timedelta(days=remaining_days)
 
     st.markdown(
         f"""
@@ -168,7 +180,7 @@ def render_secondary_sale_calculator():
                 <div class="date-value">{purchase_date.strftime('%d-%m-%Y')}</div>
             </div>
             <div class="date-card">
-                <div class="date-title">تاريخ البيع</div>
+                <div class="date-title">تاريخ البيع (اليوم)</div>
                 <div class="date-value">{sale_date.strftime('%d-%m-%Y')}</div>
             </div>
             <div class="date-card">
@@ -176,7 +188,7 @@ def render_secondary_sale_calculator():
                 <div class="date-value">{maturity_date.strftime('%d-%m-%Y')}</div>
             </div>
         </div>
-    """,
+        """,
         unsafe_allow_html=True,
     )
 
@@ -184,57 +196,37 @@ def render_secondary_sale_calculator():
         "💸 تحليل البيع الثانوي", type="primary", use_container_width=True
     )
 
+    result_to_display = None
+
     if calculate_button:
         try:
             with st.spinner("جاري تحليل البيع..."):
-                input_model = InputModelFactory.create_secondary_sale_input(
-                    {
-                        "face_value": face_value,
-                        "original_yield": original_yield,
-                        "original_tenor": original_tenor,
-                        "holding_days": holding_days,
-                        "secondary_yield": secondary_yield,
-                        "tax_rate": tax_rate,
-                    }
-                )
+                inputs = {
+                    "face_value": face_value,
+                    "original_yield": original_yield,
+                    "original_tenor": original_tenor,
+                    "holding_days": holding_days,
+                    "secondary_yield": secondary_yield,
+                    "tax_rate": tax_rate,
+                }
+                input_model = InputModelFactory.create_secondary_sale_input(inputs)
                 result = analyze_secondary_sale(input_model)
+
                 secondary_results_repo.save("latest", result)
-                # حفظ القيم المدخلة مع النتائج
-                secondary_results_repo.save(
-                    "inputs",
-                    {
-                        "face_value": face_value,
-                        "original_yield": original_yield,
-                        "original_tenor": original_tenor,
-                        "tax_rate": tax_rate,
-                        "secondary_yield": secondary_yield,
-                    },
-                )
-                display_secondary_results(
-                    result,
-                    face_value,
-                    original_yield,
-                    original_tenor,
-                    tax_rate,
-                    secondary_yield,
-                )
+                secondary_results_repo.save("inputs", inputs)
+                result_to_display = result
+
         except Exception as e:
-            st.error(f"خطأ في التحليل: {str(e)}")
+            st.error(f"خطأ في التحليل: {e}")
 
-    elif secondary_results_repo.exists("latest"):
-        latest_result = secondary_results_repo.get("latest")
-        saved_inputs = secondary_results_repo.get("inputs")
-        if latest_result and saved_inputs:
-            display_secondary_results(
-                latest_result,
-                saved_inputs.get("face_value", 25000),
-                saved_inputs.get("original_yield", 25.0),
-                saved_inputs.get("original_tenor", 91),
-                saved_inputs.get("tax_rate", 20.0),
-                saved_inputs.get("secondary_yield", 24.0),
-            )
+    else:
+        # On first load or rerun, try to get the last saved result
+        result_to_display = secondary_results_repo.get("latest")
 
-    # قسم شرح المعادلات (قابل للطي)
+    if result_to_display:
+        display_secondary_results(result_to_display)
+
+    # --- قسم شرح المعادلات (قابل للطي) ---
     with st.expander("🔍 شرح المعادلات والمصطلحات"):
         st.markdown("<h4>كيف يتم حساب البيع الثانوي؟</h4>", unsafe_allow_html=True)
         st.markdown(
