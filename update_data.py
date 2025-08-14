@@ -546,12 +546,12 @@ def _process_update_result_blocking(updated: Optional[bool], db_adapter):
 
                 if days_since_update == 0:
                     status, log_level = "محدث اليوم", logging.INFO
-                elif days_since_update is not None and days_since_update <= 2:
+                elif days_since_update is not None and days_since_update <= 7:
                     status, log_level = (
                         f"محدث قبل {days_since_update} يوم",
                         logging.INFO,
                     )
-                elif days_since_update is not None and days_since_update <= 5:
+                elif days_since_update is not None and days_since_update <= 10:
                     status, log_level = (
                         f"تحديث قديم (قبل {days_since_update} يوم)",
                         logging.WARNING,
@@ -905,3 +905,4 @@ if __name__ == "__main__":
 
         traceback.print_exc()
         sys.exit(1)
+
