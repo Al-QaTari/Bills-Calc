@@ -115,6 +115,11 @@ class AlertManager:
         }
 
 
+# ==============================================================================
+# vvvvvvvvvvvvvvvvvvvvvvvv  بداية الجزء الذي تم تعديله  vvvvvvvvvvvvvvvvvvvvvvvvvv
+# ==============================================================================
+
+
 class DatabaseManager:
     def __init__(self, data_store):
         self.data_store = data_store
@@ -126,66 +131,83 @@ class DatabaseManager:
         return self.data_store.load_all_historical_data()
 
     def check_yield_changes(self, threshold: float = 0.5) -> list:
+        """
+        النسخة النهائية والمصححة:
+        تقوم بفحص التغيرات في العائد لكل أجل على حدة (شاملة جميع الآجال)،
+        وتضمن أن جميع أنواع البيانات متوافقة مع JSON.
+        """
         try:
-            latest_data, _ = self.data_store.load_latest_data()
-            if latest_data.empty:
-                return []
-
             all_data = self.data_store.load_all_historical_data()
             if all_data.empty or len(all_data) < 2:
+                logger.info("لا توجد بيانات كافية للمقارنة.")
                 return []
 
-            # استخدم التواريخ مباشرة كما هي من القاعدة
-            latest_date = latest_data[C.SESSION_DATE_COLUMN_NAME].iloc[0]
-            previous_data = all_data[
-                all_data[C.SESSION_DATE_COLUMN_NAME] != latest_date
-            ]
-
-            if previous_data.empty:
-                return []
-
-            common_tenors = set(latest_data[C.TENOR_COLUMN_NAME]).intersection(
-                set(previous_data[C.TENOR_COLUMN_NAME])
+            # 1. تحويل عمود التاريخ إلى صيغة datetime للتعامل معه بشكل صحيح
+            all_data[C.SESSION_DATE_COLUMN_NAME] = pd.to_datetime(
+                all_data[C.SESSION_DATE_COLUMN_NAME], dayfirst=True
             )
+
             alerts = []
 
-            for tenor in common_tenors:
-                latest_row = latest_data[latest_data[C.TENOR_COLUMN_NAME] == tenor]
-                prev_row = previous_data[previous_data[C.TENOR_COLUMN_NAME] == tenor]
+            # 2. المرور على كل "أجل" (tenor) موجود في البيانات
+            unique_tenors = all_data[C.TENOR_COLUMN_NAME].unique()
 
-                if latest_row.empty or prev_row.empty:
+            for tenor in unique_tenors:
+                # 3. فلترة البيانات لعزل بيانات هذا الأجل فقط وترتيبها من الأحدث للأقدم
+                tenor_data = all_data[
+                    all_data[C.TENOR_COLUMN_NAME] == tenor
+                ].sort_values(by=C.SESSION_DATE_COLUMN_NAME, ascending=False)
+
+                # 4. التأكد من وجود جلستين على الأقل للمقارنة
+                if len(tenor_data) < 2:
                     continue
 
-                latest_yield = latest_row[C.YIELD_COLUMN_NAME].values[0]
-                prev_yield = prev_row[C.YIELD_COLUMN_NAME].values[0]
+                # 5. تحديد آخر جلستين لهذا الأجل
+                latest_entry = tenor_data.iloc[0]
+                previous_entry = tenor_data.iloc[1]
 
-                if prev_yield == 0:
+                latest_yield = latest_entry[C.YIELD_COLUMN_NAME]
+                previous_yield = previous_entry[C.YIELD_COLUMN_NAME]
+
+                if previous_yield == 0:
                     continue
 
-                change = ((latest_yield - prev_yield) / prev_yield) * 100
+                # 6. حساب نسبة التغير
+                change = ((latest_yield - previous_yield) / previous_yield) * 100
+
+                # 7. إنشاء تنبيه إذا كان التغير يتجاوز الحد المسموح به
                 if abs(change) >= threshold:
                     direction = "زيادة" if change > 0 else "انخفاض"
                     alerts.append(
                         {
-                            "tenor": tenor,
-                            "latest_yield": latest_yield,
-                            "previous_yield": prev_yield,
-                            "change_percent": change,
+                            "tenor": int(tenor),
+                            "latest_yield": float(latest_yield),
+                            "previous_yield": float(previous_yield),
+                            "change_percent": float(change),
                             "direction": direction,
-                            "latest_date": latest_date,
-                            "previous_date": prev_row[C.SESSION_DATE_COLUMN_NAME].iloc[
-                                0
-                            ],
+                            # استخدام التواريخ الفعلية من البيانات
+                            "latest_date": latest_entry[
+                                C.SESSION_DATE_COLUMN_NAME
+                            ].strftime("%d/%m/%Y"),
+                            "previous_date": previous_entry[
+                                C.SESSION_DATE_COLUMN_NAME
+                            ].strftime("%d/%m/%Y"),
                         }
                     )
             return alerts
+
         except Exception as e:
-            logger.error(f"خطأ في اكتشاف تغييرات العوائد: {str(e)}")
+            logger.error(f"خطأ في اكتشاف تغييرات العوائد: {str(e)}", exc_info=True)
             return []
 
     def clear_all_data(self):
         """مسح جميع البيانات"""
         self.data_store.clear_all_data()
+
+
+# ==============================================================================
+# ^^^^^^^^^^^^^^^^^^^^^^^^  نهاية الجزء الذي تم تعديله  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+# ==============================================================================
 
 
 class AuthSystem:
@@ -449,7 +471,7 @@ class SecretAdminPanel:
                     """
                     1. إنشاء بوت تليجرام من BotFather
                     2. أرسل رسالة للبوت الجديد
-                    3. احصل على chat_id من خلال: 
+                    3. احصل على chat_id من خلال:
                        https://api.telegram.org/botYOUR_TOKEN/getUpdates
                     4. أضف المتغيرات في ملف .env
                     """
@@ -509,6 +531,7 @@ class SecretAdminPanel:
         ):
             with st.spinner("جاري الفحص والإرسال الإجباري..."):
                 try:
+                    # استخدمنا 0.0 كحد أدنى لإرسال كل التغيرات
                     alerts = self.db_manager.check_yield_changes(0.0)
 
                     if not alerts:
@@ -529,15 +552,15 @@ class SecretAdminPanel:
         """توليد رسالة تنبيه"""
         emoji = "📈" if alert["direction"] == "زيادة" else "📉"
         return f"""
-        {emoji} *تنبيه تغيير العائد* *الأجل:* {alert['tenor']} يوم 
-        *التاريخ الحالي:* {alert['latest_date']} 
-        *التاريخ السابق:* {alert['previous_date']} 
-        
-        *العائد الحالي:* {alert['latest_yield']:.3f}% 
-        *العائد السابق:* {alert['previous_yield']:.3f}% 
-        
-        *{alert['direction']}:* {abs(alert['change_percent']):.3f}% 
-        🕒 {datetime.now().strftime('%Y-%m-%d %H:%M')} 
+        {emoji} *تنبيه تغيير العائد* *الأجل:* {alert['tenor']} يوم
+        *التاريخ الحالي:* {alert['latest_date']}
+        *التاريخ السابق:* {alert['previous_date']}
+
+        *العائد الحالي:* {alert['latest_yield']:.3f}%
+        *العائد السابق:* {alert['previous_yield']:.3f}%
+
+        *{alert['direction']}:* {abs(alert['change_percent']):.3f}%
+        🕒 {datetime.now().strftime('%Y-%m-%d %H:%M')}
         """
 
     def _send_telegram(self, message: str) -> bool:
