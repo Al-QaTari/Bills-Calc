@@ -1,22 +1,24 @@
 name: Scrape Latest CBE Data
 
 on:
+  # يسمح بالتشغيل اليدوي من صفحة Actions في GitHub
   workflow_dispatch:
+
+  # جدولة التشغيل التلقائي
   schedule:
-    - cron: '0 13-21 * * 0,4' # كل ساعة من 4 عصراً حتى 12 مساءً بتوقيت مصر، يومي الأحد والخميس
-    - cron: '0 5 * * *' # مرة واحدة يومياً الساعة 8 صباحاً بتوقيت مصر كفحص احتياطي
+    # يومي الأحد والخميس، كل ساعة من 4 عصراً حتى 12 مساءً بتوقيت مصر
+    # توقيت UTC هو (13-21)، وهو ما يعادل (16-24) بتوقيت مصر (UTC+3)
+    - cron: '0 13-21 * * 0,4'
+
+    # مرة واحدة يومياً الساعة 8 صباحاً بتوقيت مصر (5 UTC) كفحص احتياطي
+    - cron: '0 5 * * *'
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # هذا ضروري للسماح للورك فلو بالكتابة على المستودع
-
-    env:
-      SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-      POSTGRES_URI: ${{ secrets.POSTGRES_URI }}
-      AIVEN_REDIS_URI: ${{ secrets.AIVEN_REDIS_URI }}
-      SENTRY_ENVIRONMENT: ${{ secrets.SENTRY_ENVIRONMENT }}
+      # هذا الإذن ضروري للسماح لـ git-auto-commit-action بالكتابة على المستودع
+      contents: write
 
     steps:
       - name: Check out repository
@@ -32,31 +34,48 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       
-      - name: Install Playwright Browsers
+      - name: Install Playwright Browsers and dependencies
         run: playwright install chromium --with-deps
 
-      - name: Verify Environment Variables
+      - name: Verify Core Environment Variables
         run: |
           echo "Verifying required environment variables..."
-          if [ -z "${{ secrets.SENTRY_ENVIRONMENT }}" ]; then
-            echo "::error::SENTRY_ENVIRONMENT secret is NOT set or is empty in GitHub Secrets."
-            exit 1
-          else
-            echo "✅ SENTRY_ENVIRONMENT is set."
-          fi
-          
           if [ -z "${{ secrets.POSTGRES_URI }}" ]; then
             echo "::error::POSTGRES_URI secret is NOT set or is empty."
             exit 1
           else
             echo "✅ POSTGRES_URI is set."
           fi
+          if [ -z "${{ secrets.TELEGRAM_BOT_TOKEN }}" ]; then
+            echo "::error::TELEGRAM_BOT_TOKEN secret is NOT set or is empty."
+            exit 1
+          else
+            echo "✅ TELEGRAM_BOT_TOKEN is set."
+          fi
+          if [ -z "${{ secrets.TELEGRAM_CHAT_ID }}" ]; then
+            echo "::error::TELEGRAM_CHAT_ID secret is NOT set or is empty."
+            exit 1
+          else
+            echo "✅ TELEGRAM_CHAT_ID is set."
+          fi
 
       - name: Run data update script
+        # --- ✅ التعديل الأساسي هنا ---
+        # يتم تمرير كل المتغيرات التي يحتاجها السكريبت مباشرة في هذه الخطوة
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          POSTGRES_URI: ${{ secrets.POSTGRES_URI }}
+          AIVEN_REDIS_URI: ${{ secrets.AIVEN_REDIS_URI }}
+          SENTRY_ENVIRONMENT: ${{ secrets.SENTRY_ENVIRONMENT }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # يمكنك إضافة المتغيرات الاختيارية هنا أيضاً إذا أردت
+          # ALERTS_THRESHOLD: ${{ secrets.ALERTS_THRESHOLD }}
         run: python update_data.py
 
-      - name: Commit and push changes
+      - name: Commit and push if data changed
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "Update CBE historical data [BOT]"
+          # هذا النمط يضمن أن الـ commit يحدث فقط إذا تغير ملف قاعدة البيانات
           file_pattern: data/cbe_historical_data.db
