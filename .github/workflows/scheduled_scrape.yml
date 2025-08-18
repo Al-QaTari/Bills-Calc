@@ -43,25 +43,18 @@ jobs:
           if [ -z "${{ secrets.POSTGRES_URI }}" ]; then
             echo "::error::POSTGRES_URI secret is NOT set or is empty."
             exit 1
-          else
-            echo "✅ POSTGRES_URI is set."
           fi
           if [ -z "${{ secrets.TELEGRAM_BOT_TOKEN }}" ]; then
             echo "::error::TELEGRAM_BOT_TOKEN secret is NOT set or is empty."
             exit 1
-          else
-            echo "✅ TELEGRAM_BOT_TOKEN is set."
           fi
           if [ -z "${{ secrets.TELEGRAM_CHAT_ID }}" ]; then
             echo "::error::TELEGRAM_CHAT_ID secret is NOT set or is empty."
             exit 1
-          else
-            echo "✅ TELEGRAM_CHAT_ID is set."
           fi
 
       - name: Run data update script
-        # --- ✅ التعديل الأساسي هنا ---
-        # يتم تمرير كل المتغيرات التي يحتاجها السكريبت مباشرة في هذه الخطوة
+        # --- التعديل الأول: تمرير كل الأسرار المطلوبة للسكريبت ---
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           POSTGRES_URI: ${{ secrets.POSTGRES_URI }}
@@ -69,9 +62,11 @@ jobs:
           SENTRY_ENVIRONMENT: ${{ secrets.SENTRY_ENVIRONMENT }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          # يمكنك إضافة المتغيرات الاختيارية هنا أيضاً إذا أردت
-          # ALERTS_THRESHOLD: ${{ secrets.ALERTS_THRESHOLD }}
         run: python update_data.py
+
+      # --- التعديل الثاني: إضافة فترة انتظار لمنع تضارب قفل الملف ---
+      - name: Wait for file lock to release
+        run: sleep 5s
 
       - name: Commit and push if data changed
         uses: stefanzweifel/git-auto-commit-action@v5
