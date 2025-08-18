@@ -1,0 +1,61 @@
+# .github/workflows/manual_sqlite_sync.yml
+
+name: Manual SQLite Sync
+
+on:
+  # هذا الإعداد يجعله قابلاً للتشغيل اليدوي فقط
+  workflow_dispatch:
+    inputs:
+      commit_message:
+        description: 'رسالة الـ Commit (اختياري)'
+        required: false
+        default: 'Manual Sync: Force update SQLite data [BOT]'
+
+jobs:
+  sync-sqlite:
+    runs-on: ubuntu-latest
+    permissions:
+      # ضروري للسماح بالكتابة على المستودع
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Install Playwright Browsers and dependencies
+        run: playwright install chromium --with-deps
+
+      - name: Run script to force update SQLite only
+        # --- أهم جزء ---
+        # هنا نمرر متغيرات البيئة بدون قاعدة بيانات PostgreSQL
+        # هذا يجبر السكريبت على استخدام SQLite كقاعدة بيانات أساسية
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          AIVEN_REDIS_URI: ${{ secrets.AIVEN_REDIS_URI }}
+          SENTRY_ENVIRONMENT: ${{ secrets.SENTRY_ENVIRONMENT }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # لاحظ أننا لم نضف POSTGRES_URI هنا بشكل مقصود
+        
+        # نشغل السكريبت مع معامل التحديث الإجباري
+        run: python update_data.py --force-refresh
+
+      # فترة انتظار لضمان تحرير قفل الملف قبل الحفظ
+      - name: Wait for file lock to release
+        run: sleep 5s
+
+      - name: Commit and push if data changed
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: ${{ github.event.inputs.commit_message }}
+          file_pattern: data/cbe_historical_data.db
