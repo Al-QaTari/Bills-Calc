@@ -771,7 +771,9 @@ def _increment_failure_count() -> int:
     """زيادة عداد الفشل وترجيع القيمة الحالية"""
     global _FAILURE_COUNT
     _FAILURE_COUNT += 1
-    logger.warning(f"⚠️ فشل في جلب البيانات (المحاولة {_FAILURE_COUNT}/{_MAX_FAILURES})")
+    logger.warning(
+        f"⚠️ فشل في جلب البيانات (المحاولة {_FAILURE_COUNT}/{_MAX_FAILURES})"
+    )
     return _FAILURE_COUNT
 
 

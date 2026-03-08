@@ -80,9 +80,7 @@ class SQLiteDBManager(HistoricalDataStore):
     def _init_db(self) -> None:
         try:
             with self.engine.connect() as conn:
-                conn.execute(
-                    text(
-                        f"""
+                conn.execute(text(f"""
                     CREATE TABLE IF NOT EXISTS "{C.TABLE_NAME}" (
                         "{C.TENOR_COLUMN_NAME}" INTEGER NOT NULL,
                         "{C.YIELD_COLUMN_NAME}" REAL NOT NULL,
@@ -90,37 +88,23 @@ class SQLiteDBManager(HistoricalDataStore):
                         "{C.DATE_COLUMN_NAME}" DATETIME NOT NULL,
                         PRIMARY KEY ("{C.TENOR_COLUMN_NAME}", "{C.SESSION_DATE_COLUMN_NAME}")
                     )
-                """
-                    )
-                )
+                """))
 
-                conn.execute(
-                    text(
-                        f"""
+                conn.execute(text(f"""
                     CREATE INDEX IF NOT EXISTS idx_session_date ON "{C.TABLE_NAME}" (
                         SUBSTR("{C.SESSION_DATE_COLUMN_NAME}", 7, 4),
                         SUBSTR("{C.SESSION_DATE_COLUMN_NAME}", 4, 2),
                         SUBSTR("{C.SESSION_DATE_COLUMN_NAME}", 1, 2)
                     )
-                """
-                    )
-                )
+                """))
 
-                conn.execute(
-                    text(
-                        f"""
+                conn.execute(text(f"""
                     CREATE INDEX IF NOT EXISTS idx_date ON "{C.TABLE_NAME}" ("{C.DATE_COLUMN_NAME}")
-                """
-                    )
-                )
+                """))
 
-                conn.execute(
-                    text(
-                        f"""
+                conn.execute(text(f"""
                     CREATE INDEX IF NOT EXISTS idx_tenor ON "{C.TABLE_NAME}" ("{C.TENOR_COLUMN_NAME}")
-                """
-                    )
-                )
+                """))
 
                 conn.commit()
                 logger.info("✅ Database and indexes initialized successfully.")
@@ -177,14 +161,12 @@ class SQLiteDBManager(HistoricalDataStore):
                 # حفظ الصفوف الجديدة
                 records = df_to_save.to_dict("records")
                 conn.execute(
-                    text(
-                        f"""
+                    text(f"""
                         INSERT INTO \"{C.TABLE_NAME}\" 
                         (\"{C.TENOR_COLUMN_NAME}\", \"{C.YIELD_COLUMN_NAME}\", 
                          \"{C.SESSION_DATE_COLUMN_NAME}\", \"{C.DATE_COLUMN_NAME}\")
                         VALUES (:tenor, :yield, :session_date, :scrape_date)
-                        """
-                    ),
+                        """),
                     records,
                 )
 
@@ -254,13 +236,11 @@ class SQLiteDBManager(HistoricalDataStore):
             offset = 0
 
             while True:
-                query = text(
-                    f"""
+                query = text(f"""
                     SELECT * FROM "{C.TABLE_NAME}"
                     ORDER BY "{C.DATE_COLUMN_NAME}" DESC
                     LIMIT {chunk_size} OFFSET {offset}
-                """
-                )
+                """)
 
                 chunk_df = pd.read_sql_query(query, self.engine)
 
@@ -271,7 +251,9 @@ class SQLiteDBManager(HistoricalDataStore):
                 offset += chunk_size
 
                 if sys.getsizeof(all_dfs) > 100 * 1024 * 1024:
-                    logger.warning("⚠️ استخدام الذاكرة مرتفع، معالجة البيانات على مراحل")
+                    logger.warning(
+                        "⚠️ استخدام الذاكرة مرتفع، معالجة البيانات على مراحل"
+                    )
                     return pd.concat(all_dfs)
 
             if all_dfs:
@@ -360,8 +342,7 @@ class SQLiteDBManager(HistoricalDataStore):
     def get_latest_session_date(self) -> Optional[str]:
         try:
             with self.engine.connect() as conn:
-                query = text(
-                    f"""
+                query = text(f"""
                     SELECT "{C.SESSION_DATE_COLUMN_NAME}"
                     FROM "{C.TABLE_NAME}"
                     ORDER BY 
@@ -371,8 +352,7 @@ class SQLiteDBManager(HistoricalDataStore):
                             SUBSTR("{C.SESSION_DATE_COLUMN_NAME}", 1, 2)
                         ) DESC
                     LIMIT 1;
-                    """
-                )
+                    """)
                 result = conn.execute(query).fetchone()
                 return result[0] if result else None
         except Exception as e:
@@ -382,8 +362,7 @@ class SQLiteDBManager(HistoricalDataStore):
     def get_data_hash_for_date(self, session_date: str) -> Optional[str]:
         try:
             with self.engine.connect() as conn:
-                query = text(
-                    f"""
+                query = text(f"""
                     SELECT 
                         HEX(MD5(GROUP_CONCAT(
                             {C.TENOR_COLUMN_NAME} || {C.YIELD_COLUMN_NAME}, 
@@ -391,8 +370,7 @@ class SQLiteDBManager(HistoricalDataStore):
                         ))) as data_hash
                     FROM {C.TABLE_NAME}
                     WHERE {C.SESSION_DATE_COLUMN_NAME} = :session_date
-                    """
-                )
+                    """)
                 result = conn.execute(query, {"session_date": session_date}).fetchone()
                 return result[0] if result else None
         except Exception as e:
@@ -402,16 +380,14 @@ class SQLiteDBManager(HistoricalDataStore):
     def detect_data_gaps(self) -> List[Dict[str, Any]]:
         try:
             with self.engine.connect() as conn:
-                query = text(
-                    f"""
+                query = text(f"""
                     SELECT DISTINCT "{C.SESSION_DATE_COLUMN_NAME}" 
                     FROM "{C.TABLE_NAME}"
                     ORDER BY 
                         SUBSTR("{C.SESSION_DATE_COLUMN_NAME}", 7, 4) DESC,
                         SUBSTR("{C.SESSION_DATE_COLUMN_NAME}", 4, 2) DESC,
                         SUBSTR("{C.SESSION_DATE_COLUMN_NAME}", 1, 2) DESC
-                    """
-                )
+                    """)
                 db_dates = [row[0] for row in conn.execute(query).fetchall()]
 
             if not db_dates:
@@ -516,13 +492,11 @@ class SQLiteDBManager(HistoricalDataStore):
             today_ddmmyyyy = datetime.now().strftime("%d/%m/%Y")
 
             with self.engine.connect() as conn:
-                query = text(
-                    f"""
+                query = text(f"""
                     SELECT COUNT(DISTINCT "{C.SESSION_DATE_COLUMN_NAME}") 
                     FROM "{C.TABLE_NAME}"
                     WHERE "{C.SESSION_DATE_COLUMN_NAME}" = :today_ddmmyyyy
-                    """
-                )
+                    """)
                 result = conn.execute(
                     query, {"today_ddmmyyyy": today_ddmmyyyy}
                 ).fetchone()

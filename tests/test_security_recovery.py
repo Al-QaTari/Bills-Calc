@@ -4,7 +4,6 @@ import pandas as pd
 from db_manager import SQLiteDBManager
 from sqlalchemy.exc import OperationalError  # استيراد الخطأ الصحيح من SQLAlchemy
 
-
 # اختبارات الأمان واسترجاع البيانات
 
 

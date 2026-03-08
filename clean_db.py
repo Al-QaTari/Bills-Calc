@@ -18,6 +18,7 @@ python clean_db.py --db-type postgres --cutoff-date YYYY-MM-DD
 Example:
 python clean_db.py --db-type sqlite --cutoff-date 2020-01-01
 """
+
 import argparse
 import logging
 import os

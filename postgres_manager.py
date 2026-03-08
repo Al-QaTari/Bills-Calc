@@ -35,9 +35,7 @@ class PostgresDBManager(HistoricalDataStore):
         try:
             with self._get_connection() as conn:
                 with conn.begin():
-                    conn.execute(
-                        text(
-                            f"""
+                    conn.execute(text(f"""
                             CREATE TABLE IF NOT EXISTS "{C.TABLE_NAME}" (
                                 "{C.TENOR_COLUMN_NAME}" INTEGER NOT NULL,
                                 "{C.YIELD_COLUMN_NAME}" REAL NOT NULL,
@@ -45,9 +43,7 @@ class PostgresDBManager(HistoricalDataStore):
                                 "{C.DATE_COLUMN_NAME}" TIMESTAMPTZ NOT NULL,
                                 PRIMARY KEY ("{C.TENOR_COLUMN_NAME}", "{C.SESSION_DATE_COLUMN_NAME}")
                             );
-                            """
-                        )
-                    )
+                            """))
             logger.info("✅ PostgreSQL table initialized or already exists.")
         except Exception as e:
             logger.error(
@@ -115,14 +111,12 @@ class PostgresDBManager(HistoricalDataStore):
                     )
                     # حفظ الصفوف الجديدة
                     conn.execute(
-                        text(
-                            f"""
+                        text(f"""
                             INSERT INTO "{C.TABLE_NAME}" 
                             ("{C.TENOR_COLUMN_NAME}", "{C.YIELD_COLUMN_NAME}", 
                              "{C.SESSION_DATE_COLUMN_NAME}", "{C.DATE_COLUMN_NAME}")
                             VALUES (:tenor, :yield, :session_date, :date)
-                            """
-                        ),
+                            """),
                         [
                             {
                                 "tenor": row[C.TENOR_COLUMN_NAME],
@@ -159,8 +153,7 @@ class PostgresDBManager(HistoricalDataStore):
     ) -> Tuple[pd.DataFrame, Tuple[Optional[str], Optional[str]]]:
         try:
             with self._get_connection() as conn:
-                query = text(
-                    f"""
+                query = text(f"""
                     SELECT 
                         t."{C.TENOR_COLUMN_NAME}", 
                         t."{C.YIELD_COLUMN_NAME}", 
@@ -172,8 +165,7 @@ class PostgresDBManager(HistoricalDataStore):
                         FROM "{C.TABLE_NAME}" t2 
                         WHERE t2."{C.TENOR_COLUMN_NAME}" = t."{C.TENOR_COLUMN_NAME}"
                     )
-                """
-                )
+                """)
                 df = pd.read_sql_query(query, conn)
 
                 if df.empty or "max_scrape_date" not in df.columns:
@@ -322,14 +314,12 @@ class PostgresDBManager(HistoricalDataStore):
         try:
             with self._get_connection() as conn:
                 with conn.begin():
-                    query = text(
-                        f"""
+                    query = text(f"""
                         SELECT "{C.SESSION_DATE_COLUMN_NAME}"
                         FROM "{C.TABLE_NAME}"
                         ORDER BY to_date("{C.SESSION_DATE_COLUMN_NAME}", 'DD/MM/YYYY') DESC
                         LIMIT 1;
-                        """
-                    )
+                        """)
                     result = conn.execute(query).fetchone()
                     return result[0] if result else None
         except Exception as e:
@@ -341,8 +331,7 @@ class PostgresDBManager(HistoricalDataStore):
     def get_data_hash_for_date(self, session_date: str) -> Optional[str]:
         try:
             with self._get_connection() as conn:
-                query = text(
-                    f"""
+                query = text(f"""
                     SELECT 
                         MD5(string_agg(
                             {C.TENOR_COLUMN_NAME}::text || {C.YIELD_COLUMN_NAME}::text, 
@@ -350,8 +339,7 @@ class PostgresDBManager(HistoricalDataStore):
                         )) as data_hash
                     FROM "{C.TABLE_NAME}"
                     WHERE "{C.SESSION_DATE_COLUMN_NAME}" = :session_date
-                """
-                )
+                """)
                 result = conn.execute(query, {"session_date": session_date}).fetchone()
                 return result[0] if result else None
         except Exception as e:
@@ -361,14 +349,12 @@ class PostgresDBManager(HistoricalDataStore):
     def detect_data_gaps(self) -> List[Dict[str, Any]]:
         try:
             with self._get_connection() as conn:
-                query = text(
-                    f"""
+                query = text(f"""
                     SELECT "{C.SESSION_DATE_COLUMN_NAME}"
                     FROM "{C.TABLE_NAME}"
                     GROUP BY "{C.SESSION_DATE_COLUMN_NAME}"
                     ORDER BY to_date("{C.SESSION_DATE_COLUMN_NAME}", 'DD/MM/YYYY')
-                """
-                )
+                """)
                 db_dates = [row[0] for row in conn.execute(query).fetchall()]
 
             if not db_dates:
@@ -470,13 +456,11 @@ class PostgresDBManager(HistoricalDataStore):
         try:
             today_str = datetime.now().strftime("%Y-%m-%d")
             with self._get_connection() as conn:
-                query = text(
-                    f"""
+                query = text(f"""
                     SELECT COUNT(DISTINCT "{C.SESSION_DATE_COLUMN_NAME}") 
                     FROM "{C.TABLE_NAME}"
                     WHERE DATE("{C.DATE_COLUMN_NAME}" AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Cairo') = :today
-                """
-                )
+                """)
                 result = conn.execute(query, {"today": today_str}).fetchone()
                 return result[0] if result else 0
         except Exception as e:

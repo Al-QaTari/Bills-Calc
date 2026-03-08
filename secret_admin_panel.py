@@ -467,15 +467,13 @@ class SecretAdminPanel:
         if not self.telegram_token or not self.telegram_chat_id:
             st.warning("⚠️ إعدادات تليجرام غير مكتملة")
             with st.expander("دليل الإعداد"):
-                st.markdown(
-                    """
+                st.markdown("""
                     1. إنشاء بوت تليجرام من BotFather
                     2. أرسل رسالة للبوت الجديد
                     3. احصل على chat_id من خلال:
                        https://api.telegram.org/botYOUR_TOKEN/getUpdates
                     4. أضف المتغيرات في ملف .env
-                    """
-                )
+                    """)
             return
 
         stats = self.alert_manager.get_stats()

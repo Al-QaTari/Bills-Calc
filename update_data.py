@@ -322,7 +322,9 @@ def _send_alert(message: str, severity: str = "info"):
 def _increment_failure_count() -> int:
     global _FAILURE_COUNT
     _FAILURE_COUNT += 1
-    logger.warning(f"⚠️ فشل في جلب البيانات (المحاولة {_FAILURE_COUNT}/{_MAX_FAILURES})")
+    logger.warning(
+        f"⚠️ فشل في جلب البيانات (المحاولة {_FAILURE_COUNT}/{_MAX_FAILURES})"
+    )
     return _FAILURE_COUNT
 
 
