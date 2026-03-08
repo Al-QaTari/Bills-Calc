@@ -10,8 +10,9 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
 
+    # --- تم تغيير الصلاحيات هنا للسماح بالكتابة ---
     permissions:
-      contents: read
+      contents: write
 
     steps:
       - name: Check out repository code
@@ -26,12 +27,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install ruff black pytest pytest-mock # <-- إضافة pytest-mock
+          pip install ruff black pytest pytest-mock
 
-      # --- بداية التعديل: تثبيت متصفح Playwright ---
       - name: Install Playwright Browsers
         run: playwright install chromium --with-deps
-      # --- نهاية التعديل ---
 
       - name: Run tests (and skip UI tests)
         run: pytest -m "not ui"
@@ -39,5 +38,15 @@ jobs:
       - name: Lint with ruff
         run: ruff check .
 
-      - name: Check formatting with black
-        run: black . --check
+      # --- بداية التعديل: التنسيق والرفع التلقائي ---
+      - name: Check files using the black formatter
+        uses: psf/black@stable
+        with:
+          options: "--verbose"
+          src: "."
+
+      - name: Auto-commit changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "style: auto-format Python code with Black"
+      # --- نهاية التعديل ---
