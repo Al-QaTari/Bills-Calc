@@ -11,7 +11,6 @@ import logging
 import os
 import platform
 import sys
-import subprocess
 from datetime import datetime, timedelta, time
 from html import escape
 from pathlib import Path
@@ -612,7 +611,7 @@ def _process_update_result_blocking(updated: Optional[bool], db_adapter):
 def _check_and_send_telegram_alerts_blocking(db_adapter):
     alerts_enabled = os.environ.get("ALERTS_ENABLED", "true").lower() == "true"
     if not alerts_enabled:
-        logger.info("🚫 تم تعطيل إرسال تنبيجرام عبر متغيرات البيئة.")
+        logger.info("🚫 تم تعطيل إرسال تنبيهات تليجرام عبر متغيرات البيئة.")
         return
 
     logger.info("ℹ️ بدء فحص تغييرات العائد لإرسال تنبيجرام...")
@@ -644,49 +643,12 @@ def _check_and_send_telegram_alerts_blocking(db_adapter):
 
 
 # ---------------------------
-# دالة لضمان تثبيت Playwright
-# ---------------------------
-def _ensure_playwright_is_installed_for_cron():
-    """
-    تضمن تثبيت متصفح Playwright. هذا ضروري للبيئات التي لا يمكن التحكم فيها مثل مهام cron.
-    """
-    try:
-        logger.info(
-            "Ensuring Playwright browser is installed for the cron job (no-deps)..."
-        )
-        # لا نستخدم --with-deps لأن البيئة لا تسمح بـ sudo
-        result = subprocess.run(
-            ["playwright", "install", "chromium"],
-            capture_output=True,
-            text=True,
-            timeout=300,  # 5 دقائق
-            check=False,
-        )
-        if result.returncode == 0:
-            logger.info("✅ Playwright browser installed/verified successfully.")
-            return True
-        else:
-            logger.warning(
-                f"Playwright install command finished with code {result.returncode}."
-            )
-            logger.warning(f"STDOUT: {result.stdout}")
-            logger.error(f"STDERR: {result.stderr}")
-            return False
-    except Exception as e:
-        logger.error(
-            f"❌ An unexpected error occurred during Playwright setup: {e}",
-            exc_info=True,
-        )
-        return False
-
-
-# ---------------------------
 # الدالة الرئيسية (async)
 # ---------------------------
 async def main(force_refresh: bool):
     """الدالة الرئيسية للتحديث (async)"""
-    # الخطوة الأولى: التأكد من تثبيت المتصفح
-    _ensure_playwright_is_installed_for_cron()
+    # ملاحظة: تثبيت متصفح Playwright يتم مرة واحدة عند بناء الحاوية (entrypoint.sh)
+    # أو عند إعداد بيئة GitHub Actions - لا حاجة لإعادة التثبيت مع كل تحديث.
     if not CUSTOM_MODULES_AVAILABLE:
         logger.error(
             f"❌ لا يمكن تشغيل السكريبت بدون المكتبات المطلوبة: {getattr(missing_custom_modules_error, 'args', missing_custom_modules_error)}"
@@ -813,6 +775,13 @@ async def main(force_refresh: bool):
     finally:
         logger.info("=" * 60)
         logger.info("🛑 انتهاء تنفيذ المهمة المجدولة.")
+        # إغلاق اتصالات PostgreSQL المفتوحة
+        try:
+            from postgres_manager import dispose_shared_engines
+
+            dispose_shared_engines()
+        except Exception:
+            pass
 
 
 # ---------------------------

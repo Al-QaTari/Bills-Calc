@@ -3,6 +3,8 @@ Backoff retry decorator for handling transient failures in the Treasury Bills Ca
 مزخرف إعادة المحاولة التدريجية لمعالجة الأخطاء المؤقتة في حاسبة أذون الخزانة.
 """
 
+import asyncio
+import inspect
 import logging
 import time
 import random
@@ -38,6 +40,45 @@ def backoff_retry(
     """
 
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        # دوال async تحتاج غلافًا async حتى تعمل إعادة المحاولة فعليًا:
+        # الاستثناء في الكوروتين يظهر عند await وليس عند الاستدعاء
+        if inspect.iscoroutinefunction(func):
+
+            @wraps(func)
+            async def async_wrapper(*args: Any, **kwargs: Dict[str, Any]) -> T:
+                retries = 0
+                while True:
+                    try:
+                        return await func(*args, **kwargs)
+                    except exceptions_to_catch as e:
+                        retries += 1
+
+                        if retry_conditions and not retry_conditions(e):
+                            logger.error(
+                                f"لا يمكن إعادة المحاولة وفقًا للشروط: {str(e)}"
+                            )
+                            raise
+
+                        if retries > max_retries:
+                            logger.error(
+                                f"تم استنفاذ عدد المحاولات ({max_retries}). الاستثناء الأخير: {str(e)}"
+                            )
+                            raise
+
+                        delay = min(base_delay * (2 ** (retries - 1)), max_delay)
+                        if jitter:
+                            delay = delay * (1 + random.uniform(0, 0.25))
+
+                        if on_retry_callback:
+                            on_retry_callback(retries, delay, e)
+
+                        logger.warning(
+                            f"محاولة {retries}/{max_retries} فشلت، إعادة المحاولة بعد {delay:.2f} ثانية. السبب: {str(e)}"
+                        )
+                        await asyncio.sleep(delay)
+
+            return async_wrapper
+
         @wraps(func)
         def wrapper(*args: Any, **kwargs: Dict[str, Any]) -> T:
             retries = 0

@@ -98,6 +98,10 @@ Example usage:
         logger.error(
             f"💥 An error occurred during the cleaning process: {e}", exc_info=True
         )
+    finally:
+        from postgres_manager import dispose_shared_engines
+
+        dispose_shared_engines()
 
 
 if __name__ == "__main__":

@@ -21,6 +21,8 @@ from utils import (
     setup_logging,
     prepare_arabic_text,
     load_css,
+    load_light_theme_css,
+    load_polish_css,
     StateManager,
 )
 from treasury_core.ports import HistoricalDataStore, YieldDataSource
@@ -142,6 +144,8 @@ def main():
         css_path = os.path.join(os.path.dirname(__file__), "css", "styles.css")
         if os.path.exists(css_path):
             load_css(css_path)
+            load_polish_css(os.path.dirname(css_path))
+            load_light_theme_css(os.path.dirname(css_path))
         else:
             st.warning("styles.css not found.")
     except Exception as e:

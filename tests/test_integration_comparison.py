@@ -116,7 +116,7 @@ def test_data_flow_integration():
     historical_df = pd.DataFrame(
         {
             "date": ["2023-01-01", "2023-01-01", "2023-01-01", "2023-01-01"],
-            "tenor": [91, 182, 273, 364],
+            "tenor": [91, 182, 273, 357],
             "yield": [20.5, 21.0, 21.5, 22.0],
         }
     )
@@ -138,7 +138,7 @@ def test_data_flow_integration():
     assert "tenor" in df_data.columns
 
     # التحقق من صحة عملية الترشيح - وجود جميع الآجال
-    assert set(df_data["tenor"]) == set([91, 182, 273, 364])
+    assert set(df_data["tenor"]) == set([91, 182, 273, 357])
 
 
 def test_state_consistency():
@@ -155,7 +155,7 @@ def test_state_consistency():
     # تهيئة بيانات مرجعية
     df_data = pd.DataFrame(
         {
-            "tenor": [91, 182, 273, 364],
+            "tenor": [91, 182, 273, 357],
             "yield": [
                 Decimal("20.5"),
                 Decimal("21.0"),

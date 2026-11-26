@@ -61,7 +61,7 @@ def test_save_and_load_multiple_sessions(db: SQLiteDBManager):
     df2 = pd.DataFrame(
         {
             C.DATE_COLUMN_NAME: [pd.to_datetime("2025-01-12")],
-            C.TENOR_COLUMN_NAME: [364],
+            C.TENOR_COLUMN_NAME: [357],
             C.YIELD_COLUMN_NAME: [27.0],
             C.SESSION_DATE_COLUMN_NAME: ["12/01/2025"],
         }

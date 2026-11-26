@@ -12,6 +12,47 @@ from unittest.mock import (
 )  # --- التعديل هنا: استيراد الأداة اللازمة للاختبار ---
 
 
+@pytest.fixture(autouse=True)
+def _admin_password(monkeypatch):
+    """كلمة مرور الإدارة مطلوبة الآن ولا يوجد افتراضي"""
+    monkeypatch.setenv("ADMIN_PANEL_PASSWORD", "unit-test-admin-password")
+
+
+class TestAdminPasswordRequired:
+    """Admin panel must never fall back to a public default password"""
+
+    def test_missing_password_raises(self, monkeypatch):
+        from secret_admin_panel import AuthSystem
+
+        monkeypatch.delenv("ADMIN_PANEL_PASSWORD", raising=False)
+        with pytest.raises(ValueError):
+            AuthSystem()
+
+    def test_empty_password_raises(self, monkeypatch):
+        from secret_admin_panel import AuthSystem
+
+        monkeypatch.setenv("ADMIN_PANEL_PASSWORD", "")
+        with pytest.raises(ValueError):
+            AuthSystem()
+
+    def test_configured_password_verifies(self):
+        from secret_admin_panel import AuthSystem
+
+        auth = AuthSystem()
+        assert auth.verify("unit-test-admin-password") is True
+        assert auth.verify("default-password-for-testing") is False
+
+    def test_render_is_hidden_without_password(self, monkeypatch):
+        import secret_admin_panel as sap
+
+        monkeypatch.delenv("ADMIN_PANEL_PASSWORD", raising=False)
+        monkeypatch.setenv("ENABLE_ADMIN_PANEL", "true")
+        created = []
+        monkeypatch.setattr(sap, "SecretAdminPanel", lambda *a, **k: created.append(1))
+        sap.render_secret_admin_panel(MagicMock())
+        assert created == []
+
+
 class TestArgon2Security:
     """Test Argon2 password hashing security"""
 

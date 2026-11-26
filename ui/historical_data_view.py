@@ -28,7 +28,7 @@ def render_historical_data_view():
     min_date = df[C.DATE_COLUMN_NAME].min().date()
     max_date = df[C.DATE_COLUMN_NAME].max().date()
 
-    color_map = {"364 يوم": "#FFD700"}  # لون مميز لأجل السنة
+    color_map = {"357 يوم": "#FFD700"}  # لون مميز لأجل السنة
 
     with st.expander(prepare_arabic_text("⚙️ خيارات العرض والتصفية"), expanded=True):
         # ================== الجزء الذي تم تعديله ==================

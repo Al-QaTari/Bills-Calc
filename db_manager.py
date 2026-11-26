@@ -178,6 +178,8 @@ class SQLiteDBManager(HistoricalDataStore):
         self,
     ) -> Tuple[pd.DataFrame, Tuple[Optional[str], Optional[str]]]:
         try:
+            # عرض الآجال الحالية فقط وبترتيب ثابت، بدون LIMIT حتى لا تُحذف آجال بالخطأ
+            tenors_sql = ", ".join(str(int(t)) for t in C.TENORS)
             query = f"""
                 SELECT 
                     t."{C.TENOR_COLUMN_NAME}", 
@@ -185,12 +187,13 @@ class SQLiteDBManager(HistoricalDataStore):
                     t."{C.SESSION_DATE_COLUMN_NAME}",
                     (SELECT MAX("{C.DATE_COLUMN_NAME}") FROM "{C.TABLE_NAME}") as max_scrape_date
                 FROM "{C.TABLE_NAME}" t
-                WHERE t."{C.DATE_COLUMN_NAME}" = (
+                WHERE t."{C.TENOR_COLUMN_NAME}" IN ({tenors_sql})
+                AND t."{C.DATE_COLUMN_NAME}" = (
                     SELECT MAX(t2."{C.DATE_COLUMN_NAME}") 
                     FROM "{C.TABLE_NAME}" t2 
                     WHERE t2."{C.TENOR_COLUMN_NAME}" = t."{C.TENOR_COLUMN_NAME}"
                 )
-                LIMIT {len(C.TENORS)}
+                ORDER BY t."{C.TENOR_COLUMN_NAME}"
             """
             df = pd.read_sql_query(query, self.engine)
 
@@ -264,11 +267,12 @@ class SQLiteDBManager(HistoricalDataStore):
             return pd.DataFrame()
 
     def check_yield_changes(self, threshold_percent: float = 0.5) -> list:
+        """
+        مقارنة كل أجل بجلسته السابقة الخاصة به (وليس بآخر تاريخ عام لكل الآجال).
+        الطريقة القديمة كانت تقارن بتاريخ واحد سابق مشترك، فتسقط تنبيهات عطاء الخميس
+        (182/357) لأن آخر تاريخ سابق (الأحد) لا يحتوي عليها - ولهذا توقفت التنبيهات.
+        """
         try:
-            latest_data, _ = self.load_latest_data()
-            if latest_data.empty:
-                return []
-
             all_data = self.load_all_historical_data()
             if all_data.empty or len(all_data) < 2:
                 return []
@@ -277,62 +281,49 @@ class SQLiteDBManager(HistoricalDataStore):
             tenor_col = C.TENOR_COLUMN_NAME
             yield_col = C.YIELD_COLUMN_NAME
 
-            latest_data[date_col_name] = pd.to_datetime(
-                latest_data[date_col_name], dayfirst=True, errors="coerce"
-            )
+            all_data = all_data.copy()
             all_data[date_col_name] = pd.to_datetime(
                 all_data[date_col_name], dayfirst=True, errors="coerce"
             )
-
-            latest_data.dropna(subset=[date_col_name], inplace=True)
             all_data.dropna(subset=[date_col_name], inplace=True)
-
-            if latest_data.empty or all_data.empty:
+            if all_data.empty:
                 return []
-
-            latest_date = latest_data[date_col_name].max()
-
-            previous_data_full = all_data[
-                all_data[date_col_name].dt.date < latest_date.date()
-            ]
-
-            if previous_data_full.empty:
-                return []
-
-            previous_date = previous_data_full[date_col_name].max()
-            previous_data = previous_data_full[
-                previous_data_full[date_col_name] == previous_date
-            ]
-
-            merged_data = pd.merge(
-                latest_data, previous_data, on=tenor_col, suffixes=("_latest", "_prev")
-            )
-
-            if merged_data.empty:
-                return []
-
-            merged_data["change_percent"] = (
-                (merged_data[f"{yield_col}_latest"] - merged_data[f"{yield_col}_prev"])
-                / merged_data[f"{yield_col}_prev"]
-            ) * 100
-
-            alerts_df = merged_data[
-                abs(merged_data["change_percent"]) >= threshold_percent
-            ]
 
             alerts = []
-            for _, row in alerts_df.iterrows():
-                alerts.append(
-                    {
-                        "tenor": row[tenor_col],
-                        "latest_yield": row[f"{yield_col}_latest"],
-                        "previous_yield": row[f"{yield_col}_prev"],
-                        "change_percent": row["change_percent"],
-                        "direction": "زيادة" if row["change_percent"] > 0 else "انخفاض",
-                        "latest_date": latest_date.strftime("%Y-%m-%d"),
-                        "previous_date": previous_date.strftime("%Y-%m-%d"),
-                    }
+            # المرور على كل أجل على حدة ومقارنة آخر جلستين لهذا الأجل تحديدًا
+            for tenor in all_data[tenor_col].unique():
+                tenor_data = all_data[all_data[tenor_col] == tenor].sort_values(
+                    by=date_col_name, ascending=False
                 )
+                if len(tenor_data) < 2:
+                    continue
+
+                latest_entry = tenor_data.iloc[0]
+                previous_entry = tenor_data.iloc[1]
+
+                latest_yield = float(latest_entry[yield_col])
+                previous_yield = float(previous_entry[yield_col])
+                if previous_yield == 0:
+                    continue
+
+                change = ((latest_yield - previous_yield) / previous_yield) * 100
+
+                if abs(change) >= threshold_percent:
+                    alerts.append(
+                        {
+                            "tenor": int(tenor),
+                            "latest_yield": latest_yield,
+                            "previous_yield": previous_yield,
+                            "change_percent": float(change),
+                            "direction": "زيادة" if change > 0 else "انخفاض",
+                            "latest_date": latest_entry[date_col_name].strftime(
+                                "%Y-%m-%d"
+                            ),
+                            "previous_date": previous_entry[date_col_name].strftime(
+                                "%Y-%m-%d"
+                            ),
+                        }
+                    )
 
             return alerts
         except Exception as e:

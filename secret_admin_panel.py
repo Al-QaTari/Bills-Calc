@@ -213,9 +213,8 @@ class DatabaseManager:
 class AuthSystem:
     def __init__(self):
         self.ph = PasswordHasher()
-        self.master_pass = os.environ.get(
-            "ADMIN_PANEL_PASSWORD", "default-password-for-testing"
-        )
+        # لا توجد كلمة مرور افتراضية: المستودع عام، فأي افتراضي يصبح معروفًا للجميع
+        self.master_pass = os.environ.get("ADMIN_PANEL_PASSWORD")
         if not self.master_pass:
             logger.critical(
                 "FATAL: ADMIN_PANEL_PASSWORD environment variable is not set!"
@@ -603,6 +602,11 @@ class SecretAdminPanel:
 def render_secret_admin_panel(data_store):
     """الدالة الرئيسية لعرض لوحة التحكم"""
     if os.environ.get("ENABLE_ADMIN_PANEL", "true").lower() != "true":
+        return
+
+    # بدون كلمة مرور مضبوطة تبقى اللوحة مخفية بدل أن تعمل بكلمة مرور معروفة
+    if not os.environ.get("ADMIN_PANEL_PASSWORD"):
+        logger.warning("ADMIN_PANEL_PASSWORD غير مضبوط: لوحة الإدارة السرية معطلة.")
         return
 
     try:
