@@ -288,7 +288,9 @@ def render_home_page():
 
     # بطاقة العطاء القادم: رسالة التحذير بتظهر فيها بس لو البيانات قديمة
     card_color = "update-message info"
-    card_msg_html = f"<div class='card-msg'>{escape(stale_msg)}</div>" if stale_msg else ""
+    card_msg_html = (
+        f"<div class='card-msg'>{escape(stale_msg)}</div>" if stale_msg else ""
+    )
 
     auction_card = f"""
     <div class='card {card_color}'>
@@ -357,4 +359,3 @@ def render_home_page():
         display_auction_results("عطاء الخميس", group_label(_thu), data_df, _thu)
     if _sun:
         display_auction_results("عطاء الأحد", group_label(_sun), data_df, _sun)
-

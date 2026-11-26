@@ -801,9 +801,7 @@ def validate_scraped_data(
         raise ValueError(
             f"تواريخ جلسة غير مقروءة: {out.loc[session_dt.isna(), session_col].tolist()}"
         )
-    future_limit = pd.Timestamp(
-        cairo_now() + timedelta(days=MAX_FUTURE_SESSION_DAYS)
-    )
+    future_limit = pd.Timestamp(cairo_now() + timedelta(days=MAX_FUTURE_SESSION_DAYS))
     if (session_dt > future_limit).any():
         raise ValueError(
             f"تاريخ جلسة في المستقبل: {out.loc[session_dt > future_limit, session_col].tolist()}"
