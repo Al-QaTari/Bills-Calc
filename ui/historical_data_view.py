@@ -270,9 +270,7 @@ def render_historical_data_view():
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
 
-    st.plotly_chart(
-        volatility_fig, width="stretch", config={"displayModeBar": True}
-    )
+    st.plotly_chart(volatility_fig, width="stretch", config={"displayModeBar": True})
 
     st.markdown("<div class='spacer-div'></div>", unsafe_allow_html=True)
 
