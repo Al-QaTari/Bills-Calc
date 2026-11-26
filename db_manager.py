@@ -13,6 +13,11 @@ from pathlib import Path
 
 from treasury_core.ports import HistoricalDataStore
 import constants as C
+from tenors import (
+    normalize_tenor_column,
+    latest_active_rows,
+    active_tenors,
+)
 
 # ✅ إضافة استيراد PostgresDBManager
 PostgresDBManager = None
@@ -178,8 +183,7 @@ class SQLiteDBManager(HistoricalDataStore):
         self,
     ) -> Tuple[pd.DataFrame, Tuple[Optional[str], Optional[str]]]:
         try:
-            # عرض الآجال الحالية فقط وبترتيب ثابت، بدون LIMIT حتى لا تُحذف آجال بالخطأ
-            tenors_sql = ", ".join(str(int(t)) for t in C.TENORS)
+            # الآجال الحالية تُستنتج من البيانات نفسها (أحدث جلسة لكل أجل بعد توحيده)
             query = f"""
                 SELECT 
                     t."{C.TENOR_COLUMN_NAME}", 
@@ -187,15 +191,14 @@ class SQLiteDBManager(HistoricalDataStore):
                     t."{C.SESSION_DATE_COLUMN_NAME}",
                     (SELECT MAX("{C.DATE_COLUMN_NAME}") FROM "{C.TABLE_NAME}") as max_scrape_date
                 FROM "{C.TABLE_NAME}" t
-                WHERE t."{C.TENOR_COLUMN_NAME}" IN ({tenors_sql})
-                AND t."{C.DATE_COLUMN_NAME}" = (
-                    SELECT MAX(t2."{C.DATE_COLUMN_NAME}") 
-                    FROM "{C.TABLE_NAME}" t2 
-                    WHERE t2."{C.TENOR_COLUMN_NAME}" = t."{C.TENOR_COLUMN_NAME}"
-                )
-                ORDER BY t."{C.TENOR_COLUMN_NAME}"
             """
             df = pd.read_sql_query(query, self.engine)
+            if not df.empty:
+                _max = df["max_scrape_date"].iloc[0]
+                df = latest_active_rows(
+                    df, C.TENOR_COLUMN_NAME, C.SESSION_DATE_COLUMN_NAME
+                )
+                df["max_scrape_date"] = _max
 
             if not df.empty:
                 # التحقق من أن التاريخ صالح وليس 1970-01-01
@@ -233,6 +236,12 @@ class SQLiteDBManager(HistoricalDataStore):
             return pd.DataFrame(), ("البيانات الأولية", None)
 
     def load_all_historical_data(self) -> pd.DataFrame:
+        df = self._load_all_historical_data_raw()
+        return normalize_tenor_column(
+            df, C.TENOR_COLUMN_NAME, C.SESSION_DATE_COLUMN_NAME
+        )
+
+    def _load_all_historical_data_raw(self) -> pd.DataFrame:
         try:
             chunk_size = 5000
             all_dfs = []
@@ -270,7 +279,7 @@ class SQLiteDBManager(HistoricalDataStore):
         """
         مقارنة كل أجل بجلسته السابقة الخاصة به (وليس بآخر تاريخ عام لكل الآجال).
         الطريقة القديمة كانت تقارن بتاريخ واحد سابق مشترك، فتسقط تنبيهات عطاء الخميس
-        (182/357) لأن آخر تاريخ سابق (الأحد) لا يحتوي عليها - ولهذا توقفت التنبيهات.
+        (182/364) لأن آخر تاريخ سابق (الأحد) لا يحتوي عليها - ولهذا توقفت التنبيهات.
         """
         try:
             all_data = self.load_all_historical_data()
@@ -289,10 +298,20 @@ class SQLiteDBManager(HistoricalDataStore):
             if all_data.empty:
                 return []
 
+            all_data = normalize_tenor_column(
+                all_data, tenor_col, C.SESSION_DATE_COLUMN_NAME
+            )
+            _active = set(
+                active_tenors(
+                    all_data,
+                    tenor_col=tenor_col,
+                    session_col=C.SESSION_DATE_COLUMN_NAME,
+                )
+            )
             alerts = []
             # المرور على كل أجل على حدة ومقارنة آخر جلستين لهذا الأجل تحديدًا
             for tenor in all_data[tenor_col].unique():
-                if int(tenor) not in C.TENORS:
+                if int(tenor) not in _active:
                     continue  # آجال ملغاة لا تُرسل عنها تنبيهات
                 tenor_data = all_data[all_data[tenor_col] == tenor].sort_values(
                     by=date_col_name, ascending=False

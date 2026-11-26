@@ -54,26 +54,81 @@ def get_streamlit_theme_type() -> Optional[str]:
     return theme_type if theme_type in ("light", "dark") else None
 
 
+LIGHT_THEME_ATTR = "data-app-theme"
+
+# يقرأ لون خلفية Streamlit الفعلي (مش إعداد الجهاز) ويكتب data-app-theme على <html>.
+# السبب: st.context.theme.type وإعداد الجهاز ممكن يختلفوا عن الثيم اللي Streamlit
+# بيرسمه فعلاً (مثلاً لو المستخدم اختار Light من Settings والجهاز Dark)، وده كان
+# بيخلط ألوان فاتحة وغامقة.
+_THEME_SYNC_JS = """
+(function () {
+  if (window.__bcThemeSync) { window.__bcThemeSync(); return; }
+  function apply() {
+    var app = document.querySelector('.stApp');
+    if (!app) { return; }
+    var m = getComputedStyle(app).backgroundColor.match(/[\\d.]+/g);
+    if (!m) { return; }
+    var lum = 0.299 * m[0] + 0.587 * m[1] + 0.114 * m[2];
+    document.documentElement.setAttribute('data-app-theme', lum > 140 ? 'light' : 'dark');
+  }
+  window.__bcThemeSync = apply;
+  apply();
+  var obs = new MutationObserver(apply);
+  obs.observe(document.documentElement, {attributes: true, attributeFilter: ['class', 'style']});
+  var app = document.querySelector('.stApp');
+  if (app) { obs.observe(app, {attributes: true, attributeFilter: ['class', 'style']}); }
+  if (window.matchMedia) {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { setTimeout(apply, 50); });
+  }
+  setInterval(apply, 1000);
+})();
+"""
+
+
+def scope_css_to_light_theme(css: str) -> str:
+    """
+    Prefix every rule in a simple stylesheet (no @media / @keyframes blocks) with
+    html[data-app-theme="light"], so the rules only apply when the page is really light.
+    ':root' becomes the html element itself.
+    """
+    import re
+
+    prefix = f'html[{LIGHT_THEME_ATTR}="light"]'
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    out = []
+    for block in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
+        selectors, body = block.group(1).strip(), block.group(2)
+        if not selectors or selectors.startswith("@"):
+            continue
+        scoped = []
+        for sel in selectors.split(","):
+            sel = sel.strip()
+            if not sel:
+                continue
+            if sel == ":root":
+                scoped.append(prefix)
+            else:
+                scoped.append(f"{prefix} {sel}")
+        out.append(f"{', '.join(scoped)} {{{body}}}")
+    return "\n".join(out)
+
+
 def load_light_theme_css(css_dir: str) -> None:
     """
-    Inject css/light.css when the Streamlit theme is light.
+    Inject css/light.css scoped to html[data-app-theme="light"].
 
-    Dark stays the base look from styles.css. If the theme cannot be detected,
-    the light rules are wrapped in a prefers-color-scheme media query so they
-    still follow the device setting.
+    Dark stays the base look from styles.css. The attribute is set in the browser
+    from the real Streamlit background color, so the light rules apply exactly when
+    the page is light, whatever the device setting or st.context.theme says.
     """
-    theme_type = get_streamlit_theme_type()
-    if theme_type == "dark":
-        return
     light_path = os.path.join(css_dir, "light.css")
     if not os.path.exists(light_path):
         logger.warning(f"Light theme CSS not found at path: {light_path}")
         return
     with open(light_path, encoding="utf-8") as f:
-        css = f.read()
-    if theme_type is None:
-        css = f"@media (prefers-color-scheme: light) {{{css}}}"
+        css = scope_css_to_light_theme(f.read())
     st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
+    st.html(f"<script>{_THEME_SYNC_JS}</script>", unsafe_allow_javascript=True)
 
 
 def load_polish_css(css_dir: str) -> None:
@@ -146,13 +201,15 @@ def connect_auction_data_with_calculators() -> None:
     tenor_yield_map = {}
 
     # Extract yield rates for each tenor
-    for tenor in C.TENORS:
+    for tenor in sorted(df_data[C.TENOR_COLUMN_NAME].unique()):
         tenor_data = df_data[df_data[C.TENOR_COLUMN_NAME] == tenor]
         if not tenor_data.empty:
             yield_rate = tenor_data[C.YIELD_COLUMN_NAME].iloc[0]
             tenor_yield_map[tenor] = yield_rate
             StateManager.set(f"latest_yield_{tenor}", yield_rate)
 
+    # الآجال الحالية للحاسبات (من البيانات نفسها)
+    st.session_state["_df_data_for_tenors"] = df_data.copy()
     # Store complete map for quick access
     StateManager.set("tenor_yield_map", tenor_yield_map)
     logger.info(f"تم ربط بيانات العائد: {tenor_yield_map}")

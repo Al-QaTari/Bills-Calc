@@ -122,8 +122,8 @@ def test_postgres_load_latest_filters_current_tenors():
     import postgres_manager
 
     src = inspect.getsource(postgres_manager.PostgresDBManager.load_latest_data)
-    assert "IN ({tenors_sql})" in src
-    assert "ORDER BY" in src
+    assert "latest_active_rows" in src  # الآجال من البيانات، مش قائمة ثابتة
+    assert "IN ({tenors_sql})" not in src
 
 
 def test_sqlite_load_latest_has_no_limit():
@@ -135,8 +135,8 @@ def test_sqlite_load_latest_has_no_limit():
     src = inspect.getsource(db_manager.SQLiteDBManager.load_latest_data)
     # لا يوجد استعلام بـ LIMIT عددي (التعليقات العربية مسموح بها)
     assert not re.search(r"\bLIMIT\s*[\d{]", src)
-    assert "IN ({tenors_sql})" in src
-    assert "ORDER BY" in src
+    assert "latest_active_rows" in src
+    assert "IN ({tenors_sql})" not in src
 
 
 # ---------- سكريبت التحديث لا يثبت playwright مع كل تشغيل ----------

@@ -6,6 +6,7 @@ from utils import prepare_arabic_text, format_currency, validate_face_value
 from state_manager import Repository, StateManager
 from treasury_core.models import PrimaryYieldResult
 import constants as C
+from tenors import active_tenors, calc_days
 from decimal import Decimal
 
 # إنشاء خزان للنتائج
@@ -80,7 +81,9 @@ def render_primary_yield_calculator():
                 """<div class='input-label'>أجل الإذن (يوم)</div>""",
                 unsafe_allow_html=True,
             )
-            tenor_options = C.TENORS
+            tenor_options = active_tenors(
+                st.session_state.get("_df_data_for_tenors"), C.TENORS
+            )
             tenor = st.selectbox(
                 label="أجل الإذن",
                 label_visibility="collapsed",
@@ -140,13 +143,21 @@ def render_primary_yield_calculator():
                     {
                         "face_value": face_value,
                         "yield_rate": yield_rate,
-                        "tenor": tenor,
+                        "tenor": calc_days(
+                            tenor, st.session_state.get("_df_data_for_tenors")
+                        ),
                         "tax_rate": tax_rate,
                     }
                 )
                 result = calculate_primary_yield(input_model)
                 primary_results_repo.save("latest", result)
-                display_primary_results(result, face_value, yield_rate, tenor, tax_rate)
+                display_primary_results(
+                    result,
+                    face_value,
+                    yield_rate,
+                    calc_days(tenor, st.session_state.get("_df_data_for_tenors")),
+                    tax_rate,
+                )
         except Exception as e:
             st.error(f"خطأ في الحساب: {str(e)}")
     elif not face_value_error and primary_results_repo.exists("latest"):

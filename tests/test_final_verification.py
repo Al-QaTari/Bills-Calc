@@ -28,54 +28,28 @@ from treasury_core.models import PrimaryYieldInput, SecondarySaleInput
 
 
 def test_tenors_definition_is_current():
-    """الآجال الحالية هي 91/182/273/357 فقط، ولا وجود لـ 364 أو 336."""
-    assert C.TENORS == [91, 182, 273, 357]
-    assert 364 not in C.TENORS and 336 not in C.TENORS
+    """الآجال الأساسية 91/182/273/364. 357 و336 هم نفس أذن السنة وبيتوحدوا لـ 364."""
+    assert C.TENORS == [91, 182, 273, 364]
     assert C.INITIAL_DATA[C.TENOR_COLUMN_NAME] == C.TENORS
     assert len(C.INITIAL_DATA[C.YIELD_COLUMN_NAME]) == len(C.TENORS)
     assert len(C.INITIAL_DATA[C.SESSION_DATE_COLUMN_NAME]) == len(C.TENORS)
 
 
-def test_no_discontinued_tenors_anywhere_in_source():
-    """لا يوجد أي ذكر للآجال الملغاة في ملفات التطبيق (خارج الاختبارات والحسابات المرجعية)."""
+def test_no_hardcoded_tenor_lists_in_ui():
+    """الواجهة ما فيهاش قوائم آجال ثابتة للكروت (بتتحدد من البيانات)."""
     import pathlib
-    import re
 
     root = pathlib.Path(__file__).resolve().parent.parent
-    app_files = [
-        "app.py",
-        "constants.py",
-        "utils.py",
-        "db_manager.py",
-        "postgres_manager.py",
-        "cbe_scraper.py",
-        "update_data.py",
-        "secret_admin_panel.py",
-        "ui/home_page.py",
-        "ui/primary_yield_calculator.py",
-        "ui/secondary_sale_calculator.py",
-        "ui/historical_data_view.py",
-        "ui/help_page.py",
-        "factories.py",
-        "treasury_core/calculations.py",
-        "treasury_core/models.py",
-    ]
-    for rel in app_files:
-        text = (root / rel).read_text(encoding="utf-8")
-        for dead in ("364", "336"):
-            assert not re.search(
-                rf"(?<!\d){dead}(?!\d)", text
-            ), f"{rel} still mentions tenor {dead}"
-
-
-# ---------- 2) إصلاح "غير متاح" ----------
+    text = (root / "ui/home_page.py").read_text(encoding="utf-8")
+    assert "[182, 357]" not in text and "[91, 273]" not in text
+    assert "active_tenors" in text
 
 
 @pytest.fixture
 def seeded_db(tmp_path):
     db = SQLiteDBManager(db_filename=tmp_path / "t.db")
     rows = []
-    # جلستان حديثتان بالآجال الحالية + بقايا آجال ملغاة (336 و364) بتواريخ أحدث
+    # جلسة حديثة + جلسة أقدم لأذن السنة بقيمة 336/357 (نفس الأذن)
     for tenor, y in [(91, 24.9), (182, 25.3), (273, 26.2), (357, 26.1)]:
         rows.append(
             {
@@ -85,7 +59,10 @@ def seeded_db(tmp_path):
                 C.DATE_COLUMN_NAME: pd.to_datetime("2026-11-19"),
             }
         )
-    for tenor, y in [(336, 27.0), (364, 26.07)]:
+    for tenor, y in [
+        (336, 27.0),
+        (364, 26.07),
+    ]:  # نفس أذن السنة بنفس الجلسة: واحد بس يفضل
         rows.append(
             {
                 C.TENOR_COLUMN_NAME: tenor,
@@ -98,9 +75,9 @@ def seeded_db(tmp_path):
     return db
 
 
-def test_load_latest_returns_all_current_tenors_only(seeded_db):
+def test_load_latest_returns_all_current_tenors_normalized(seeded_db):
     df, (d, t) = seeded_db.load_latest_data()
-    assert sorted(df[C.TENOR_COLUMN_NAME].tolist()) == [91, 182, 273, 357]
+    assert sorted(df[C.TENOR_COLUMN_NAME].tolist()) == [91, 182, 273, 364]
     # مرتبة تصاعديًا بشكل ثابت
     assert df[C.TENOR_COLUMN_NAME].tolist() == sorted(df[C.TENOR_COLUMN_NAME].tolist())
     assert d == "2026-11-19"
@@ -121,7 +98,7 @@ def test_load_latest_no_random_dropping_with_many_tenors(tmp_path):
         )
     db.save_data(pd.DataFrame(rows))
     df, _ = db.load_latest_data()
-    assert len(df) == 4
+    assert len(df) == 4  # 336/357/364 = أذن السنة (صف واحد)
     assert set(df[C.TENOR_COLUMN_NAME]) == set(C.TENORS)
 
 
@@ -379,8 +356,8 @@ def test_alert_fires_for_thursday_tenor_change(tmp_path):
     _seed_two_sessions(db)
     alerts = db.check_yield_changes(threshold_percent=0.5)
     tenors = {a["tenor"] for a in alerts}
-    assert 357 in tenors, f"يجب أن يظهر تنبيه 357 - وصل: {alerts}"
-    a357 = next(a for a in alerts if a["tenor"] == 357)
+    assert 364 in tenors, f"يجب أن يظهر تنبيه 364 (357 في الصفحة) - وصل: {alerts}"
+    a357 = next(a for a in alerts if a["tenor"] == 364)
     assert a357["direction"] == "زيادة"
     assert a357["latest_date"] == "2026-11-19"
     assert a357["previous_date"] == "2026-11-12"

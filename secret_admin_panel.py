@@ -4,6 +4,7 @@ import os
 import logging
 import requests
 import pandas as pd
+from tenors import active_tenors
 from datetime import datetime, timedelta
 import hashlib
 import json
@@ -147,13 +148,14 @@ class DatabaseManager:
                 all_data[C.SESSION_DATE_COLUMN_NAME], dayfirst=True
             )
 
+            _active = set(active_tenors(all_data))
             alerts = []
 
             # 2. المرور على كل "أجل" (tenor) موجود في البيانات
             unique_tenors = all_data[C.TENOR_COLUMN_NAME].unique()
 
             for tenor in unique_tenors:
-                if int(tenor) not in C.TENORS:
+                if int(tenor) not in _active:
                     continue  # آجال ملغاة لا تُرسل عنها تنبيهات
                 # 3. فلترة البيانات لعزل بيانات هذا الأجل فقط وترتيبها من الأحدث للأقدم
                 tenor_data = all_data[

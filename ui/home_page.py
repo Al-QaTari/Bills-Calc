@@ -17,6 +17,7 @@ from utils import prepare_arabic_text, StateManager
 from dependency_container import container
 from treasury_core.ports import HistoricalDataStore
 import constants as C
+from tenors import active_tenors, auction_day_groups, group_label
 import subprocess
 import sys
 from pathlib import Path
@@ -170,7 +171,7 @@ def display_auction_results(
         91: ("yellow", "🟡"),
         182: ("blue", "🔵"),
         273: ("purple", "🟣"),
-        357: ("white", "⚪️"),
+        364: ("white", "⚪️"),
     }
     # A default map for any other tenors that might be added
     default_color_map = {
@@ -336,10 +337,12 @@ def render_home_page():
         st.session_state.update_status = None
 
     # Display auction results
-    display_auction_results(
-        "عطاء الخميس", "آجال (6 أشهر و 12 شهر)", data_df, [182, 357]
-    )
-    display_auction_results("عطاء الأحد", "آجال (3 أشهر و 9 أشهر)", data_df, [91, 273])
+    # الآجال بتتحدد من البيانات نفسها، فأي أجل جديد بينزل بيظهر تلقائيًا
+    _thu, _sun = auction_day_groups(active_tenors(data_df))
+    if _thu:
+        display_auction_results("عطاء الخميس", group_label(_thu), data_df, _thu)
+    if _sun:
+        display_auction_results("عطاء الأحد", group_label(_sun), data_df, _sun)
 
     # Back to top button
     st.markdown('<a href="#top" class="back-to-top">▲</a>', unsafe_allow_html=True)
