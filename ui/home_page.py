@@ -292,7 +292,7 @@ def render_home_page():
     update_btn_clicked = st.button(
         "🔄 تحديث سريع",
         key="update_button_real",
-        use_container_width=True,
+        width="stretch",
         help="تحديث سريع للبيانات من قاعدة البيانات",
     )
     if update_btn_clicked:

@@ -54,18 +54,26 @@ def render_primary_yield_calculator():
                     if not filtered_df.empty
                     else default_yield_float
                 )
+                # في Streamlit الحديث، مع وجود key يتجاهل الحقل وسيط value بعد أول رسم،
+                # فنكتب القيمة مباشرة في session_state قبل إنشاء الحقل.
+                st.session_state["yield_rate_input"] = value_for_input
             else:
                 value_for_input = default_yield_float
+            _yield_kwargs = (
+                {}
+                if "yield_rate_input" in st.session_state
+                else {"value": value_for_input}
+            )
             yield_rate = st.number_input(
                 label="معدل العائد",
                 label_visibility="collapsed",
                 min_value=0.001,
                 max_value=50.0,
-                value=value_for_input,
                 step=0.001,
                 format="%.3f",
                 disabled=use_latest,
                 key="yield_rate_input",
+                **_yield_kwargs,
             )
         with col3:
             st.markdown(
@@ -121,7 +129,7 @@ def render_primary_yield_calculator():
         calculate_button = st.button(
             prepare_arabic_text("💰 احسب العائد"),
             type="primary",
-            use_container_width=True,
+            width="stretch",
             disabled=bool(face_value_error),
         )
 

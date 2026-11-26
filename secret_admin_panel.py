@@ -153,6 +153,8 @@ class DatabaseManager:
             unique_tenors = all_data[C.TENOR_COLUMN_NAME].unique()
 
             for tenor in unique_tenors:
+                if int(tenor) not in C.TENORS:
+                    continue  # آجال ملغاة لا تُرسل عنها تنبيهات
                 # 3. فلترة البيانات لعزل بيانات هذا الأجل فقط وترتيبها من الأحدث للأقدم
                 tenor_data = all_data[
                     all_data[C.TENOR_COLUMN_NAME] == tenor
@@ -366,7 +368,7 @@ class SecretAdminPanel:
         col1, col2 = st.columns(2)
 
         with col1:
-            if st.button("🔍 اختبار قاعدة البيانات", use_container_width=True):
+            if st.button("🔍 اختبار قاعدة البيانات", width="stretch"):
                 with st.spinner("جاري الاختبار..."):
                     if self.db_manager.get_latest_data().empty:
                         st.error("❌ لا توجد بيانات")
@@ -374,7 +376,7 @@ class SecretAdminPanel:
                         st.success("✅ قاعدة البيانات متاحة")
 
         with col2:
-            if st.button("📱 اختبار تليجرام", use_container_width=True):
+            if st.button("📱 اختبار تليجرام", width="stretch"):
                 if not self.telegram_token or not self.telegram_chat_id:
                     st.error("❌ إعدادات تليجرام غير مكتملة")
                 else:
@@ -394,7 +396,7 @@ class SecretAdminPanel:
         st.markdown("### 🚀 التحديث الشامل")
         st.info("تشغيل اسكريبت التحديث لجلب أحدث البيانات")
 
-        if st.button("🚀 تشغيل التحديث", type="primary", use_container_width=True):
+        if st.button("🚀 تشغيل التحديث", type="primary", width="stretch"):
             with st.spinner("جاري التحديث..."):
                 try:
                     process = subprocess.Popen(
@@ -443,7 +445,7 @@ class SecretAdminPanel:
 
             if not data.empty:
                 st.markdown("### 📊 البيانات")
-                st.dataframe(data.head(50), use_container_width=True)
+                st.dataframe(data.head(50), width="stretch")
 
                 csv = data.to_csv(index=False).encode("utf-8")
                 st.download_button(
@@ -478,7 +480,7 @@ class SecretAdminPanel:
         stats = self.alert_manager.get_stats()
         st.markdown(f"**التنبيهات المخزنة:** {stats['total_alerts']}")
 
-        if st.button("🗑️ مسح كاش التنبيهات", use_container_width=True):
+        if st.button("🗑️ مسح كاش التنبيهات", width="stretch"):
             if self.alert_manager.clear_cache():
                 st.success("تم المسح بنجاح")
                 st.rerun()
@@ -488,7 +490,7 @@ class SecretAdminPanel:
         st.info(
             "**الإرسال العادي:** يرسل التنبيهات الجديدة فقط التي لم يتم إرسالها من قبل."
         )
-        if st.button("🔍 فحص وإرسال التنبيهات الجديدة", use_container_width=True):
+        if st.button("🔍 فحص وإرسال التنبيهات الجديدة", width="stretch"):
             with st.spinner("جاري فحص التنبيهات الجديدة..."):
                 threshold = float(os.environ.get("ALERTS_THRESHOLD", "0.5"))
                 alerts = self.db_manager.check_yield_changes(threshold)
@@ -524,7 +526,7 @@ class SecretAdminPanel:
             "⚠️ **إرسال إجباري:** هذا الزر سيتجاهل ذاكرة التخزين المؤقت ويرسل جميع التغييرات المكتشفة حاليًا، حتى لو تم إرسالها من قبل."
         )
         if st.button(
-            "🚀 إرسال إجباري لجميع التنبيهات", type="primary", use_container_width=True
+            "🚀 إرسال إجباري لجميع التنبيهات", type="primary", width="stretch"
         ):
             with st.spinner("جاري الفحص والإرسال الإجباري..."):
                 try:

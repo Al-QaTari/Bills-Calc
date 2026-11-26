@@ -121,15 +121,21 @@ def render_secondary_sale_calculator():
                     original_yield_value = float(
                         filtered_df[C.YIELD_COLUMN_NAME].iloc[0]
                     )
+                    # مع وجود key يتجاهل Streamlit وسيط value بعد أول رسم
+                    st.session_state["sec_orig_yield"] = original_yield_value
 
             original_yield = st.number_input(
                 prepare_arabic_text("معدل العائد الأصلي (%)"),
                 min_value=0.001,
-                value=original_yield_value,
                 step=0.001,
                 format="%.3f",
                 key="sec_orig_yield",
                 disabled=use_latest_original,
+                **(
+                    {}
+                    if "sec_orig_yield" in st.session_state
+                    else {"value": original_yield_value}
+                ),
             )
 
         row2_col1, row2_col2, row2_col3 = st.columns(3)
@@ -201,7 +207,7 @@ def render_secondary_sale_calculator():
     calculate_button = st.button(
         "💸 تحليل البيع الثانوي",
         type="primary",
-        use_container_width=True,
+        width="stretch",
         disabled=bool(face_value_error),
     )
 

@@ -292,6 +292,8 @@ class SQLiteDBManager(HistoricalDataStore):
             alerts = []
             # المرور على كل أجل على حدة ومقارنة آخر جلستين لهذا الأجل تحديدًا
             for tenor in all_data[tenor_col].unique():
+                if int(tenor) not in C.TENORS:
+                    continue  # آجال ملغاة لا تُرسل عنها تنبيهات
                 tenor_data = all_data[all_data[tenor_col] == tenor].sort_values(
                     by=date_col_name, ascending=False
                 )
