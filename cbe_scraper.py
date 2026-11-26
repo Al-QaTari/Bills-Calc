@@ -10,6 +10,8 @@ from contextlib import contextmanager
 import platform
 import redis
 import hashlib
+import subprocess
+import threading
 
 # استيرادات محسنة مع معالجة أخطاء Windows
 try:
@@ -37,6 +39,53 @@ except ImportError as e:
     print(f"⚠️ تحذير: مكتبة مفقودة - {e}")
 
 logger = logging.getLogger(__name__)
+
+
+_CHROMIUM_LOCK = threading.Lock()
+_CHROMIUM_READY = False
+
+
+def ensure_chromium_installed(force: bool = False) -> bool:
+    """يتأكد من وجود متصفح Chromium الخاص بـ Playwright، ويثبّته مرة واحدة إن لم يكن موجودًا.
+
+    مهم على Streamlit Cloud: لا يوجد ترمنال، فالتثبيت يتم من الكود بنفس المستخدم
+    الذي يشغّل التطبيق. النتيجة True إذا المتصفح جاهز.
+    """
+    global _CHROMIUM_READY
+    if _CHROMIUM_READY and not force:
+        return True
+    with _CHROMIUM_LOCK:
+        if _CHROMIUM_READY and not force:
+            return True
+        if not PLAYWRIGHT_AVAILABLE:
+            return False
+        try:
+            if not force:
+                from playwright.sync_api import sync_playwright
+
+                with sync_playwright() as pw:
+                    if os.path.exists(pw.chromium.executable_path):
+                        _CHROMIUM_READY = True
+                        return True
+        except Exception as e:  # الفحص فقط، نكمل للتثبيت
+            logger.warning(f"تعذر فحص متصفح Chromium: {e}")
+        try:
+            logger.info("⬇️ جاري تثبيت متصفح Chromium (مرة واحدة)...")
+            result = subprocess.run(
+                [sys.executable, "-m", "playwright", "install", "chromium"],
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+            if result.returncode != 0:
+                logger.error(f"❌ فشل تثبيت Chromium: {result.stderr[-500:]}")
+                return False
+            _CHROMIUM_READY = True
+            logger.info("✅ تم تثبيت Chromium")
+            return True
+        except Exception as e:
+            logger.error(f"❌ فشل تثبيت Chromium: {e}")
+            return False
 
 
 @contextmanager
@@ -342,6 +391,9 @@ class CbeScraper(YieldDataSource):
             return None
 
         logger.info("🚀 جاري استخراج البيانات من موقع البنك المركزي...")
+
+        # تثبيت Chromium تلقائيًا إن كان غير موجود (Streamlit Cloud)
+        await asyncio.to_thread(ensure_chromium_installed)
 
         browser = None
         context = None
