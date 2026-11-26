@@ -62,6 +62,7 @@ jobs:
           SENTRY_ENVIRONMENT: ${{ secrets.SENTRY_ENVIRONMENT }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ALERTS_THRESHOLD: ${{ secrets.ALERTS_THRESHOLD || '0.5' }}
         run: python update_data.py
 
       # --- التعديل الثاني: إضافة فترة انتظار لمنع تضارب قفل الملف ---
