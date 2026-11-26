@@ -62,7 +62,7 @@ def test_primary_yield_calculator_ui(mock_streamlit):
     # تهيئة بيانات وهمية للاختبار
     StateManager.set(
         "df_data",
-        pd.DataFrame({"tenor": [91, 182, 273, 364], "yield": [20.5, 21.0, 21.5, 22.0]}),
+        pd.DataFrame({"tenor": [91, 182, 273, 357], "yield": [20.5, 21.0, 21.5, 22.0]}),
     )
 
     # محاكاة الضغط على زر الحساب
@@ -104,7 +104,7 @@ def test_secondary_sale_calculator_ui(mock_streamlit):
     # تهيئة بيانات وهمية للاختبار
     StateManager.set(
         "df_data",
-        pd.DataFrame({"tenor": [91, 182, 273, 364], "yield": [20.5, 21.0, 21.5, 22.0]}),
+        pd.DataFrame({"tenor": [91, 182, 273, 357], "yield": [20.5, 21.0, 21.5, 22.0]}),
     )
 
     # محاكاة الضغط على زر الحساب

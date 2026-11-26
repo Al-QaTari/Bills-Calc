@@ -2,7 +2,7 @@
 import streamlit as st
 from factories import InputModelFactory
 from treasury_core.calculations import calculate_primary_yield
-from utils import prepare_arabic_text, format_currency
+from utils import prepare_arabic_text, format_currency, validate_face_value
 from state_manager import Repository, StateManager
 from treasury_core.models import PrimaryYieldResult
 import constants as C
@@ -25,7 +25,7 @@ def render_primary_yield_calculator():
             face_value = st.number_input(
                 label="القيمة الاسمية",
                 label_visibility="collapsed",
-                min_value=C.MIN_T_BILL_AMOUNT,
+                min_value=0.0,
                 max_value=10000000.0,
                 value=25000.0,
                 step=C.T_BILL_AMOUNT_STEP,
@@ -59,7 +59,7 @@ def render_primary_yield_calculator():
             yield_rate = st.number_input(
                 label="معدل العائد",
                 label_visibility="collapsed",
-                min_value=1.0,
+                min_value=0.001,
                 max_value=50.0,
                 value=value_for_input,
                 step=0.001,
@@ -72,7 +72,7 @@ def render_primary_yield_calculator():
                 """<div class='input-label'>أجل الإذن (يوم)</div>""",
                 unsafe_allow_html=True,
             )
-            tenor_options = [91, 182, 273, 364]
+            tenor_options = C.TENORS
             tenor = st.selectbox(
                 label="أجل الإذن",
                 label_visibility="collapsed",
@@ -113,11 +113,16 @@ def render_primary_yield_calculator():
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
+        face_value_error = validate_face_value(face_value)
+        if face_value_error:
+            st.error(prepare_arabic_text(face_value_error))
+
         # زر الحساب وسط الشاشة
         calculate_button = st.button(
             prepare_arabic_text("💰 احسب العائد"),
             type="primary",
             use_container_width=True,
+            disabled=bool(face_value_error),
         )
 
     if calculate_button:
@@ -136,7 +141,7 @@ def render_primary_yield_calculator():
                 display_primary_results(result, face_value, yield_rate, tenor, tax_rate)
         except Exception as e:
             st.error(f"خطأ في الحساب: {str(e)}")
-    elif primary_results_repo.exists("latest"):
+    elif not face_value_error and primary_results_repo.exists("latest"):
         display_primary_results(primary_results_repo.get("latest"))
 
 
@@ -207,9 +212,7 @@ def display_primary_results(
         st.markdown("💸 **الضريبة المستحقة** = العائد الإجمالي × معدل الضريبة ÷ 100")
         st.markdown("✅ **صافي الربح** = العائد الإجمالي - الضريبة المستحقة")
         st.markdown("📊 **إجمالي المبلغ عند الاستحقاق** = القيمة الاسمية + صافي الربح")
-        st.markdown(
-            "🎯 **نسبة الربح الحقيقية** = (صافي الربح ÷ سعر الشراء) × (365 ÷ الأجل) × 100"
-        )
+        st.markdown("🎯 **نسبة الربح الحقيقية** = (صافي الربح ÷ سعر الشراء) × 100")
 
         st.info(
             "💡 **ملاحظة مهمة:** معادلة سعر الشراء تحسب المبلغ الذي يجب دفعه اليوم للحصول على القيمة الاسمية عند الاستحقاق. كلما زاد العائد، انخفض سعر الشراء."

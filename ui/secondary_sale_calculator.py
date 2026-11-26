@@ -8,6 +8,8 @@ of treasury bills, calculating potential profits or losses based on various inpu
 
 from datetime import datetime, timedelta
 
+import pytz
+
 import streamlit as st
 
 import constants as C
@@ -15,7 +17,7 @@ from factories import InputModelFactory
 from state_manager import Repository
 from treasury_core.calculations import analyze_secondary_sale
 from treasury_core.models import SecondarySaleResult
-from utils import format_currency, prepare_arabic_text
+from utils import format_currency, prepare_arabic_text, validate_face_value
 
 # Initialize a repository to persist secondary sale results in the session state
 secondary_results_repo = Repository[SecondarySaleResult]("secondary_sale")
@@ -98,7 +100,7 @@ def render_secondary_sale_calculator():
         with row1_col1:
             face_value = st.number_input(
                 prepare_arabic_text("القيمة الاسمية (جنيه)"),
-                min_value=C.MIN_T_BILL_AMOUNT,
+                min_value=0.0,
                 value=25000.0,
                 step=C.T_BILL_AMOUNT_STEP,
                 format="%.1f",
@@ -107,7 +109,7 @@ def render_secondary_sale_calculator():
         with row1_col3:
             original_tenor = st.selectbox(
                 prepare_arabic_text("أجل الإذن الأصلي"),
-                [91, 182, 273, 364],
+                C.TENORS,
                 key="sec_tenor",
             )
 
@@ -122,7 +124,7 @@ def render_secondary_sale_calculator():
 
             original_yield = st.number_input(
                 prepare_arabic_text("معدل العائد الأصلي (%)"),
-                min_value=1.0,
+                min_value=0.001,
                 value=original_yield_value,
                 step=0.001,
                 format="%.3f",
@@ -153,7 +155,7 @@ def render_secondary_sale_calculator():
         with row2_col3:
             secondary_yield = st.number_input(
                 prepare_arabic_text("معدل العائد الثانوي (%)"),
-                min_value=1.0,
+                min_value=0.001,
                 value=24.0,
                 step=0.001,
                 format="%.3f",
@@ -167,7 +169,7 @@ def render_secondary_sale_calculator():
         )
 
     # --- Dynamic Date Calculation (Updated Logic) ---
-    sale_date = datetime.now()
+    sale_date = datetime.now(pytz.timezone(C.TIMEZONE))
     purchase_date = sale_date - timedelta(days=holding_days)
     remaining_days = original_tenor - holding_days
     maturity_date = sale_date + timedelta(days=remaining_days)
@@ -192,8 +194,15 @@ def render_secondary_sale_calculator():
         unsafe_allow_html=True,
     )
 
+    face_value_error = validate_face_value(face_value)
+    if face_value_error:
+        st.error(prepare_arabic_text(face_value_error))
+
     calculate_button = st.button(
-        "💸 تحليل البيع الثانوي", type="primary", use_container_width=True
+        "💸 تحليل البيع الثانوي",
+        type="primary",
+        use_container_width=True,
+        disabled=bool(face_value_error),
     )
 
     result_to_display = None
@@ -219,7 +228,7 @@ def render_secondary_sale_calculator():
         except Exception as e:
             st.error(f"خطأ في التحليل: {e}")
 
-    else:
+    elif not face_value_error:
         # On first load or rerun, try to get the last saved result
         result_to_display = secondary_results_repo.get("latest")
 

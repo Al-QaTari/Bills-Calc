@@ -45,6 +45,47 @@ def load_css(file_path: str) -> None:
         logger.warning(f"CSS file not found at path: {file_path}")
 
 
+def get_streamlit_theme_type() -> Optional[str]:
+    """Return "light" or "dark" from the active Streamlit theme, or None if unknown."""
+    try:
+        theme_type = st.context.theme.type
+    except Exception:
+        return None
+    return theme_type if theme_type in ("light", "dark") else None
+
+
+def load_light_theme_css(css_dir: str) -> None:
+    """
+    Inject css/light.css when the Streamlit theme is light.
+
+    Dark stays the base look from styles.css. If the theme cannot be detected,
+    the light rules are wrapped in a prefers-color-scheme media query so they
+    still follow the device setting.
+    """
+    theme_type = get_streamlit_theme_type()
+    if theme_type == "dark":
+        return
+    light_path = os.path.join(css_dir, "light.css")
+    if not os.path.exists(light_path):
+        logger.warning(f"Light theme CSS not found at path: {light_path}")
+        return
+    with open(light_path, encoding="utf-8") as f:
+        css = f.read()
+    if theme_type is None:
+        css = f"@media (prefers-color-scheme: light) {{{css}}}"
+    st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
+
+
+def load_polish_css(css_dir: str) -> None:
+    """Inject css/polish.css (rounded corners, hover/click motion, glow, emoji font)."""
+    polish_path = os.path.join(css_dir, "polish.css")
+    if not os.path.exists(polish_path):
+        logger.warning(f"Polish CSS not found at path: {polish_path}")
+        return
+    with open(polish_path, encoding="utf-8") as f:
+        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+
+
 def setup_logging(level: int = logging.INFO) -> None:
     """
     Setup logging configuration.
@@ -105,7 +146,7 @@ def connect_auction_data_with_calculators() -> None:
     tenor_yield_map = {}
 
     # Extract yield rates for each tenor
-    for tenor in [91, 182, 273, 364]:
+    for tenor in C.TENORS:
         tenor_data = df_data[df_data[C.TENOR_COLUMN_NAME] == tenor]
         if not tenor_data.empty:
             yield_rate = tenor_data[C.YIELD_COLUMN_NAME].iloc[0]
@@ -184,3 +225,26 @@ def render_date_cards(purchase_date: str, sale_date: str, maturity_date: str) ->
     </div>
     """
     st.markdown(date_cards_html, unsafe_allow_html=True)
+
+
+def validate_face_value(value) -> Optional[str]:
+    """Return an Arabic error message if value is not a valid T-bill amount.
+
+    A valid amount is at least C.MIN_T_BILL_AMOUNT and an exact multiple of
+    C.T_BILL_AMOUNT_STEP (25,000 EGP). Returns None when the amount is valid.
+    """
+    from decimal import Decimal, InvalidOperation
+
+    try:
+        amount = Decimal(str(value))
+        step = Decimal(str(C.T_BILL_AMOUNT_STEP))
+        minimum = Decimal(str(C.MIN_T_BILL_AMOUNT))
+    except (InvalidOperation, TypeError, ValueError):
+        return "القيمة الاسمية غير صحيحة."
+    if not amount.is_finite():
+        return "القيمة الاسمية غير صحيحة."
+    if amount < minimum:
+        return f"أقل قيمة اسمية هي {int(minimum):,} جنيه."
+    if amount % step != 0:
+        return f"القيمة الاسمية لازم تكون من مضاعفات {int(step):,} جنيه (مثل 25,000 أو 50,000 أو 75,000)."
+    return None

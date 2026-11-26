@@ -91,7 +91,7 @@ def test_data_recovery_from_backup(mock_read_csv, mock_exists):
     mock_data = pd.DataFrame(
         {
             "date": ["2023-01-01", "2023-01-01", "2023-01-01"],
-            "tenor": [91, 182, 364],
+            "tenor": [91, 182, 357],
             "yield": [20.5, 21.0, 21.5],
         }
     )

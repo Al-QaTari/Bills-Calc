@@ -170,7 +170,7 @@ def display_auction_results(
         91: ("yellow", "🟡"),
         182: ("blue", "🔵"),
         273: ("purple", "🟣"),
-        364: ("white", "⚪️"),
+        357: ("white", "⚪️"),
     }
     # A default map for any other tenors that might be added
     default_color_map = {
@@ -337,7 +337,7 @@ def render_home_page():
 
     # Display auction results
     display_auction_results(
-        "عطاء الخميس", "آجال (6 أشهر و 12 شهر)", data_df, [182, 364]
+        "عطاء الخميس", "آجال (6 أشهر و 12 شهر)", data_df, [182, 357]
     )
     display_auction_results("عطاء الأحد", "آجال (3 أشهر و 9 أشهر)", data_df, [91, 273])
 
