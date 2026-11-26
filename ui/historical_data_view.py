@@ -174,7 +174,7 @@ def render_historical_data_view():
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
 
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": True})
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": True})
 
     # عرض منحنى العائد إذا تم تحديد الخيار
     if show_yield_curve and not filtered_df.empty:
@@ -214,7 +214,7 @@ def render_historical_data_view():
 
             st.plotly_chart(
                 yield_curve_fig,
-                use_container_width=True,
+                width="stretch",
                 config={"displayModeBar": True},
             )
             st.caption(
@@ -271,7 +271,7 @@ def render_historical_data_view():
     )
 
     st.plotly_chart(
-        volatility_fig, use_container_width=True, config={"displayModeBar": True}
+        volatility_fig, width="stretch", config={"displayModeBar": True}
     )
 
     st.markdown("<div class='spacer-div'></div>", unsafe_allow_html=True)
@@ -282,7 +282,7 @@ def render_historical_data_view():
     )
 
     formatted_stats_df = stats_df.round(3)
-    st.dataframe(formatted_stats_df, use_container_width=True)
+    st.dataframe(formatted_stats_df, width="stretch")
 
     # --- حذف كود عرض جدول جميع الأيام (بما في ذلك المفقودة) ---
     # (تم حذف كود إنشاء merged_df وعرض st.dataframe الخاص به)

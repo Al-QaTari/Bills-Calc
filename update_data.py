@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, List
 
 import requests
+from sqlalchemy import text
 
 # ---------------------------
 # إعداد مسار المشروع بأمان
@@ -132,12 +133,60 @@ HTTP_SESSION.headers.update({"User-Agent": "cbe-updater/1.0"})
 # أدوات إدارة كاش التنبيهات
 # ---------------------------
 class AlertManager:
-    def __init__(self, cache_file: Path = ALERT_CACHE_FILE):
+    def __init__(self, cache_file: Path = ALERT_CACHE_FILE, engine=None):
         self.cache_file = cache_file
+        # قاعدة البيانات هي المصدر الدائم لتنبيهات أُرسلت (الملف المحلي يضيع مع كل
+        # تشغيل جديد على GitHub Actions أو إعادة تشغيل Streamlit Cloud)
+        self.engine = engine
+        self._init_db_table()
         self._inproc_lock = (
             asyncio.Lock()
         )  # لحماية الكتابة داخل نفس العملية عند الاستخدام async
         self.cache: Dict[str, Any] = self._load_cache()
+
+    def _init_db_table(self):
+        if self.engine is None:
+            return
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "CREATE TABLE IF NOT EXISTS sent_alerts "
+                        "(alert_hash VARCHAR(64) PRIMARY KEY, sent_at VARCHAR(40))"
+                    )
+                )
+        except Exception as e:
+            logger.warning(f"تعذر تجهيز جدول التنبيهات في القاعدة ({e})")
+            self.engine = None
+
+    def _db_has(self, alert_hash: str) -> bool:
+        if self.engine is None:
+            return False
+        try:
+            with self.engine.connect() as conn:
+                row = conn.execute(
+                    text("SELECT 1 FROM sent_alerts WHERE alert_hash = :h"),
+                    {"h": alert_hash},
+                ).fetchone()
+            return row is not None
+        except Exception as e:
+            logger.warning(f"تعذر قراءة جدول التنبيهات ({e})")
+            return False
+
+    def _db_mark(self, alert_hash: str):
+        if self.engine is None:
+            return
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "INSERT INTO sent_alerts (alert_hash, sent_at) "
+                        "VALUES (:h, :t) ON CONFLICT (alert_hash) DO NOTHING"
+                    ),
+                    {"h": alert_hash, "t": datetime.now().isoformat()},
+                )
+        except Exception as e:
+            logger.warning(f"تعذر حفظ التنبيه في القاعدة ({e})")
 
     def _load_cache(self) -> Dict[str, Any]:
         try:
@@ -193,13 +242,15 @@ class AlertManager:
 
     def is_duplicate(self, alert: Dict[str, Any]) -> bool:
         self._cleanup_old_entries()
-        return self._generate_hash(alert) in self.cache.get("alerts", {})
+        h = self._generate_hash(alert)
+        return h in self.cache.get("alerts", {}) or self._db_has(h)
 
     def mark_sent(self, alert: Dict[str, Any]):
         alert_hash = self._generate_hash(alert)
         self.cache.setdefault("alerts", {})[alert_hash] = {
             "timestamp": datetime.now().isoformat()
         }
+        self._db_mark(alert_hash)
         # كتابة متزامنة بسيطة (لا تنتظر هنا)
         try:
             self._save_cache_atomic()
@@ -616,7 +667,7 @@ def _check_and_send_telegram_alerts_blocking(db_adapter):
 
     logger.info("ℹ️ بدء فحص تغييرات العائد لإرسال تنبيجرام...")
     try:
-        manager = AlertManager()
+        manager = AlertManager(engine=getattr(db_adapter, "engine", None))
         threshold = float(os.environ.get("ALERTS_THRESHOLD", "0.5"))
 
         # ✅ تم التعديل: استخدام db_adapter الذي تم تمريره

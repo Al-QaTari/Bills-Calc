@@ -234,7 +234,7 @@ def test_telegram_full_pipeline_fake_send(tmp_path, monkeypatch):
     monkeypatch.setattr(
         update_data,
         "AlertManager",
-        lambda: real_alert_manager(cache_file=tmp_path / "alerts.json"),
+        lambda **kw: real_alert_manager(cache_file=tmp_path / "alerts.json", **kw),
     )
 
     sent = []
