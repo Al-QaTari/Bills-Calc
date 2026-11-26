@@ -9,6 +9,7 @@ This module contains the home page functionality including:
 - Auction results display
 """
 
+import os
 import streamlit as st
 import pandas as pd
 import pytz
@@ -249,6 +250,17 @@ def render_home_page():
     # تعريف المتغيرين قبل استخدامهما
     next_auction_dt, next_auction_day = get_next_auction_date(now_cairo)
 
+    # لو النهارده يوم عطاء (خميس/أحد) وبيانات عطاء النهارده دخلت قاعدة البيانات
+    # بالفعل، البطاقة تنقل للعطاء اللي بعده فورًا بدل ما تستنى لحد نص الليل
+    if now_cairo.weekday() in (3, 6) and not data_df.empty:
+        latest_session = pd.to_datetime(
+            data_df[C.SESSION_DATE_COLUMN_NAME], format="%d/%m/%Y", errors="coerce"
+        ).max()
+        if pd.notna(latest_session) and latest_session.date() >= now_cairo.date():
+            next_auction_dt, next_auction_day = get_next_auction_date(
+                _shift_days(now_cairo, 1)
+            )
+
     # تحذير لو البيانات المعروضة قديمة. العطاءات أحد وخميس بس، فأكبر فجوة طبيعية
     # 3 أيام (خميس → أحد)؛ التحذير يظهر بعدها عشان منبّهش في الأيام العادية.
     # بيتعرض جوه بطاقة العطاء القادم (مكان رسالة "يمكنك تحديث البيانات الآن" القديمة)
@@ -260,6 +272,39 @@ def render_home_page():
                 f"ℹ️ البيانات المعروضة آخر تحديث لها {last_update_date} (منذ {days_since} يوم) "
                 "- اضغط «تحديث سريع» لجلب أحدث النتائج."
             )
+
+    # حالة تنبيه تليجرام لأحدث تغيير في العائد: بتقرأ نفس جدول sent_alerts اللي
+    # بيسجّل فيه update_data.py بعد ما تليجرام يقبل الرسالة، ونفس دالة اكتشاف
+    # التغيير، فاللي يظهر هنا هو بالظبط حالة التنبيه الحقيقية
+    telegram_msg = ""
+    try:
+        from update_data import AlertManager
+
+        if os.environ.get("ALERTS_ENABLED", "true").lower() != "true":
+            telegram_msg = (
+                "🚫 تنبيهات تليجرام معطلة من الإعدادات (ALERTS_ENABLED=false)."
+            )
+        elif not os.environ.get("TELEGRAM_BOT_TOKEN") or not os.environ.get(
+            "TELEGRAM_CHAT_ID"
+        ):
+            telegram_msg = (
+                "⚠️ تنبيهات تليجرام مش مضبوطة في التطبيق "
+                "(التوكن أو الـChat ID ناقص)."
+            )
+        else:
+            threshold = float(os.environ.get("ALERTS_THRESHOLD", "0.5"))
+            alerts = db_adapter.check_yield_changes(threshold_percent=threshold)
+            if alerts:
+                manager = AlertManager(engine=getattr(db_adapter, "engine", None))
+                if all(manager.is_duplicate(a) for a in alerts):
+                    telegram_msg = "✅ تم إرسال تنبيه تليجرام بأحدث تغيير في العائد."
+                else:
+                    telegram_msg = (
+                        "🔔 فيه تغيير في العائد لسه ماتبعتش تنبيهه "
+                        "- اضغط «تحديث سريع»."
+                    )
+    except Exception:
+        telegram_msg = ""
 
     # Update button logic - Always allow updates
 
@@ -286,11 +331,13 @@ def render_home_page():
     )
     countdown_str = format_countdown(time_to_auction)
 
-    # بطاقة العطاء القادم: رسالة التحذير بتظهر فيها بس لو البيانات قديمة
+    # بطاقة العطاء القادم: رسالة التحذير بتظهر فيها بس لو البيانات قديمة،
+    # وتحتها سطر حالة تنبيه تليجرام لو فيه ما يُقال
     card_color = "update-message info"
-    card_msg_html = (
-        f"<div class='card-msg'>{escape(stale_msg)}</div>" if stale_msg else ""
-    )
+    card_msg_html = ""
+    for _msg in (stale_msg, telegram_msg):
+        if _msg:
+            card_msg_html += f"<div class='card-msg'>{escape(_msg)}</div>"
 
     auction_card = f"""
     <div class='card {card_color}'>
@@ -310,7 +357,7 @@ def render_home_page():
         "🔄 تحديث سريع",
         key="update_button_real",
         width="stretch",
-        help="تحديث سريع للبيانات من قاعدة البيانات",
+        help="جلب أحدث البيانات من موقع البنك المركزي",
     )
     if update_btn_clicked:
         with st.spinner("🔄 جاري التحديث السريع..."):
