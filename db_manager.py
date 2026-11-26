@@ -302,7 +302,11 @@ class SQLiteDBManager(HistoricalDataStore):
                 all_data, tenor_col, C.SESSION_DATE_COLUMN_NAME
             )
             _active = set(
-                active_tenors(all_data, tenor_col=tenor_col, session_col=C.SESSION_DATE_COLUMN_NAME)
+                active_tenors(
+                    all_data,
+                    tenor_col=tenor_col,
+                    session_col=C.SESSION_DATE_COLUMN_NAME,
+                )
             )
             alerts = []
             # المرور على كل أجل على حدة ومقارنة آخر جلستين لهذا الأجل تحديدًا

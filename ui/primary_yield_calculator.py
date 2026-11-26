@@ -81,7 +81,9 @@ def render_primary_yield_calculator():
                 """<div class='input-label'>أجل الإذن (يوم)</div>""",
                 unsafe_allow_html=True,
             )
-            tenor_options = active_tenors(st.session_state.get("_df_data_for_tenors"), C.TENORS)
+            tenor_options = active_tenors(
+                st.session_state.get("_df_data_for_tenors"), C.TENORS
+            )
             tenor = st.selectbox(
                 label="أجل الإذن",
                 label_visibility="collapsed",
@@ -141,7 +143,9 @@ def render_primary_yield_calculator():
                     {
                         "face_value": face_value,
                         "yield_rate": yield_rate,
-                        "tenor": calc_days(tenor, st.session_state.get("_df_data_for_tenors")),
+                        "tenor": calc_days(
+                            tenor, st.session_state.get("_df_data_for_tenors")
+                        ),
                         "tax_rate": tax_rate,
                     }
                 )

@@ -23,7 +23,9 @@ def render_historical_data_view():
         return
 
     # توحيد الأجل (357/336 -> 364) عشان أذن السنة يظهر كأجل واحد في الجداول والرسوم
-    df = normalize_tenor_column(df, C.TENOR_COLUMN_NAME, C.SESSION_DATE_COLUMN_NAME).copy()
+    df = normalize_tenor_column(
+        df, C.TENOR_COLUMN_NAME, C.SESSION_DATE_COLUMN_NAME
+    ).copy()
     if df.empty:
         st.error(prepare_arabic_text("⚠️ لا توجد بيانات تاريخية متاحة."))
         return

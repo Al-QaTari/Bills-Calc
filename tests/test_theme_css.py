@@ -46,9 +46,7 @@ def test_scope_function_handles_root_and_lists():
         ":root { --a: 1; } /* c */ .x, .y > b { color: red; }"
     )
     assert 'html[data-app-theme="light"] { --a: 1; }' in out
-    assert (
-        'html[data-app-theme="light"] .x, html[data-app-theme="light"] .y > b' in out
-    )
+    assert 'html[data-app-theme="light"] .x, html[data-app-theme="light"] .y > b' in out
 
 
 def test_light_rules_count_matches_source():

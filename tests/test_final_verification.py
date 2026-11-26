@@ -59,7 +59,10 @@ def seeded_db(tmp_path):
                 C.DATE_COLUMN_NAME: pd.to_datetime("2026-11-19"),
             }
         )
-    for tenor, y in [(336, 27.0), (364, 26.07)]:  # نفس أذن السنة بنفس الجلسة: واحد بس يفضل
+    for tenor, y in [
+        (336, 27.0),
+        (364, 26.07),
+    ]:  # نفس أذن السنة بنفس الجلسة: واحد بس يفضل
         rows.append(
             {
                 C.TENOR_COLUMN_NAME: tenor,
