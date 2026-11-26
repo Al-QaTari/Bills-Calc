@@ -1,4 +1,5 @@
 import streamlit as st
+from timeutil import cairo_now
 import time
 import os
 import logging
@@ -335,6 +336,9 @@ class SecretAdminPanel:
                     st.rerun()
                 else:
                     st.session_state.attempts += 1
+                    # تأخير تصاعدي بعد كل محاولة فاشلة: بيغلّظ التخمين حتى مع جلسة جديدة
+                    delay = min(2**st.session_state.attempts, 30)
+                    time.sleep(delay)
                     remaining = MAX_LOGIN_ATTEMPTS - st.session_state.attempts
                     if st.session_state.attempts >= MAX_LOGIN_ATTEMPTS:
                         st.error("تم تجاوز الحد الأقصى لمحاولات الدخول")
@@ -561,7 +565,7 @@ class SecretAdminPanel:
         *العائد السابق:* {alert['previous_yield']:.3f}%
 
         *{alert['direction']}:* {abs(alert['change_percent']):.3f}%
-        🕒 {datetime.now().strftime('%Y-%m-%d %H:%M')}
+        🕒 {cairo_now().strftime('%Y-%m-%d %H:%M')}
         """
 
     def _send_telegram(self, message: str) -> bool:
@@ -640,7 +644,7 @@ if __name__ == "__main__":
             return (
                 pd.DataFrame(
                     {
-                        "session_date": [datetime.now().strftime("%d/%m/%Y")],
+                        "session_date": [cairo_now().strftime("%d/%m/%Y")],
                         "tenor": [91],
                         "yield": [5.1],
                     }
@@ -652,9 +656,9 @@ if __name__ == "__main__":
             df = pd.DataFrame(
                 {
                     "session_date": [
-                        (datetime.now() - timedelta(days=7)).strftime("%d/%m/%Y"),
-                        (datetime.now() - timedelta(days=1)).strftime("%d/%m/%Y"),
-                        datetime.now().strftime("%d/%m/%Y"),
+                        (cairo_now() - timedelta(days=7)).strftime("%d/%m/%Y"),
+                        (cairo_now() - timedelta(days=1)).strftime("%d/%m/%Y"),
+                        cairo_now().strftime("%d/%m/%Y"),
                     ],
                     "tenor": [91, 91, 91],
                     "yield": [4.9, 5.0, 5.1],
@@ -663,7 +667,7 @@ if __name__ == "__main__":
             return df
 
         def get_latest_session_date(self):
-            return datetime.now().strftime("%Y-%m-%d")
+            return cairo_now().strftime("%Y-%m-%d")
 
         def clear_all_data(self):
             logger.info("Mock clear_all_data called.")

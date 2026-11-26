@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, List
 
 import requests
+from timeutil import cairo_now
 from sqlalchemy import text
 
 # ---------------------------
@@ -119,7 +120,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------
 # ثوابت وإعدادات عامة
 # ---------------------------
-_FAILURE_COUNT = 0
 _MAX_FAILURES = 5
 
 ALERT_CACHE_FILE = PROJECT_DIR / "sent_alerts_cache.json"
@@ -361,26 +361,160 @@ def _send_alert(message: str, severity: str = "info"):
         except Exception as e:
             logger.error(f"فشل إرسال تنبيه Slack: {e}", exc_info=True)
 
-    # placeholder لإيميلات التنبيه (لم يُنفذ بعد)
-    if os.environ.get("EMAIL_ALERTS", "").lower() == "true":
-        logger.info("📧 إرسال الإيميل مفعل (لكن لم يُنفذ بعد).")
+
+# ---------------------------
+# عداد الفشل المستمر (يبقى محفوظًا بين تشغيلات GitHub Actions)
+# ---------------------------
+UPDATE_STATE_FILE = PROJECT_DIR / "update_state.json"
+
+
+class FailureTracker:
+    """
+    عداد الفشل المتتالي، محفوظ في قاعدة البيانات (جدول update_state) مع بديل ملف
+    JSON ثم الذاكرة كآخر حل. العداد القديم كان في الذاكرة فقط فيتصفّر مع كل تشغيل
+    جديد على GitHub Actions، فكان تنبيه «فشل متتالي» مستحيل التحقق. نفس نمط
+    sent_alerts: القاعدة هي المصدر الدائم.
+    """
+
+    KEY = "consecutive_failures"
+
+    def __init__(self, engine=None, state_file: Path = UPDATE_STATE_FILE):
+        self.engine = engine
+        self.state_file = state_file
+        self._memory_count = 0
+        self._init_db_table()
+
+    def _init_db_table(self):
+        if self.engine is None:
+            return
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "CREATE TABLE IF NOT EXISTS update_state "
+                        "(state_key VARCHAR(64) PRIMARY KEY, "
+                        "state_value VARCHAR(255), updated_at VARCHAR(40))"
+                    )
+                )
+        except Exception as e:
+            logger.warning(f"تعذر تجهيز جدول حالة التحديث في القاعدة ({e})")
+            self.engine = None
+
+    def _db_get(self) -> Optional[int]:
+        if self.engine is None:
+            return None
+        try:
+            with self.engine.connect() as conn:
+                row = conn.execute(
+                    text("SELECT state_value FROM update_state WHERE state_key = :k"),
+                    {"k": self.KEY},
+                ).fetchone()
+            return int(row[0]) if row else 0
+        except Exception as e:
+            logger.warning(f"تعذر قراءة عداد الفشل من القاعدة ({e})")
+            return None
+
+    def _db_set(self, value: int) -> bool:
+        if self.engine is None:
+            return False
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "INSERT INTO update_state (state_key, state_value, updated_at) "
+                        "VALUES (:k, :v, :t) "
+                        "ON CONFLICT (state_key) DO UPDATE SET "
+                        "state_value = :v, updated_at = :t"
+                    ),
+                    {"k": self.KEY, "v": str(value), "t": datetime.now().isoformat()},
+                )
+            return True
+        except Exception as e:
+            logger.warning(f"تعذر حفظ عداد الفشل في القاعدة ({e})")
+            return False
+
+    def _file_get(self) -> int:
+        try:
+            if self.state_file.exists():
+                with self.state_file.open("r", encoding="utf-8") as f:
+                    return int(json.load(f).get(self.KEY, 0))
+        except Exception as e:
+            logger.warning(f"تعذر قراءة ملف حالة التحديث ({e})")
+        return 0
+
+    def _file_set(self, value: int):
+        try:
+            tmp = self.state_file.with_suffix(".tmp")
+            with tmp.open("w", encoding="utf-8") as f:
+                json.dump(
+                    {self.KEY: value, "updated_at": datetime.now().isoformat()},
+                    f,
+                    ensure_ascii=False,
+                )
+            tmp.replace(self.state_file)
+        except Exception as e:
+            logger.warning(f"تعذر حفظ ملف حالة التحديث ({e})")
+
+    def get_count(self) -> int:
+        db_val = self._db_get()
+        if db_val is not None:
+            return db_val
+        file_val = self._file_get()
+        return file_val if file_val > 0 else self._memory_count
+
+    def _set_count(self, value: int):
+        self._memory_count = value
+        if not self._db_set(value):
+            self._file_set(value)
+
+    def increment(self) -> int:
+        count = self.get_count() + 1
+        self._set_count(count)
+        return count
+
+    def reset(self):
+        self._set_count(0)
+
+
+_FAILURE_TRACKER: Optional[FailureTracker] = None
+
+
+def _get_failure_tracker() -> FailureTracker:
+    global _FAILURE_TRACKER
+    if _FAILURE_TRACKER is None:
+        _FAILURE_TRACKER = FailureTracker()
+    return _FAILURE_TRACKER
+
+
+def _init_failure_tracker(engine=None) -> FailureTracker:
+    """يربط العداد بمحرك قاعدة البيانات بعد تهيئة الخدمات."""
+    global _FAILURE_TRACKER
+    _FAILURE_TRACKER = FailureTracker(engine=engine)
+    return _FAILURE_TRACKER
+
+
+def _consecutive_failures_alert(count: int):
+    """تنبيه حرج عند بلوغ الحد، ثم تذكير كل _MAX_FAILURES فشل إضافي."""
+    if count >= _MAX_FAILURES and count % _MAX_FAILURES == 0:
+        _send_alert(
+            f"فشل التحديث {count} مرة متتالية - تحقق من سكرابر البنك المركزي أو خطوط الاتصال",
+            severity="critical",
+        )
 
 
 # ---------------------------
 # عداد الأخطاء
 # ---------------------------
 def _increment_failure_count() -> int:
-    global _FAILURE_COUNT
-    _FAILURE_COUNT += 1
+    count = _get_failure_tracker().increment()
     logger.warning(
-        f"⚠️ فشل في جلب البيانات (المحاولة {_FAILURE_COUNT}/{_MAX_FAILURES})"
+        f"⚠️ فشل في جلب البيانات (المحاولة {count}/{_MAX_FAILURES} متتالية، محفوظة بين التشغيلات)"
     )
-    return _FAILURE_COUNT
+    return count
 
 
 def _reset_failure_count():
-    global _FAILURE_COUNT
-    _FAILURE_COUNT = 0
+    _get_failure_tracker().reset()
     logger.info("🔄 تم إعادة تعيين عداد الفشل بعد التحديث الناجح")
 
 
@@ -401,7 +535,7 @@ def _next_business_date(start_date: datetime.date) -> datetime.date:
 
 def calculate_next_update_time() -> datetime:
     """حساب وقت التحديث التالي — نسخة مُصححة وأكثر ثباتًا"""
-    now = datetime.now()
+    now = cairo_now()
     today = now.date()
 
     # إذا اليوم ليس يوم عمل (Fri/Sat) فارجع أول يوم عمل لاحق في الساعة 09:00
@@ -586,7 +720,7 @@ def _process_update_result_blocking(updated: Optional[bool], db_adapter):
                     last_date = None
 
                 days_since_update = (
-                    (datetime.now() - last_date).days if last_date else None
+                    (cairo_now() - last_date).days if last_date else None
                 )
                 gap_status = ""
 
@@ -619,7 +753,7 @@ def _process_update_result_blocking(updated: Optional[bool], db_adapter):
                     f"ℹ️ البيانات {status}{gap_status} | أحدث تاريخ: {latest_date}",
                 )
 
-                if log_level >= logging.WARNING and datetime.now().weekday() in [
+                if log_level >= logging.WARNING and cairo_now().weekday() in [
                     3,
                     6,
                 ]:  # الخميس والأحد فقط
@@ -719,6 +853,8 @@ async def main(force_refresh: bool):
         # ✅ تم التعديل: تهيئة مديري قواعد البيانات
         adapters = _initialize_services()
         scraper_adapter = CbeScraper()
+        # ربط عداد الفشل المتتالي بقاعدة البيانات ليبقى محفوظًا بين التشغيلات
+        _init_failure_tracker(engine=getattr(adapters[0], "engine", None))
 
         logger.info(
             f"{'🔄' if force_refresh else '⏳'} جاري جلب البيانات {'مع تجاهل الكاش' if force_refresh else 'من الكاش'}..."
@@ -799,29 +935,26 @@ async def main(force_refresh: bool):
 
     except asyncio.TimeoutError as e:
         logger.error(f"⏰ {str(e)}")
-        _increment_failure_count()
-        if _FAILURE_COUNT >= _MAX_FAILURES:
-            _send_alert(
-                f"فشل التحديث {_MAX_FAILURES} مرات متتالية - توقف النظام",
-                severity="critical",
-            )
+        count = _increment_failure_count()
+        _consecutive_failures_alert(count)
         raise
     except Exception as e:
         logger.error(f"❌ خطأ في جلب البيانات أو المعالجة: {e}", exc_info=True)
-        _increment_failure_count()
+        count = _increment_failure_count()
         # سجل التفاصيل وأرسل تنبيه
         import traceback
 
-        error_details = (
-            f"❗ فشل التحديث المجدول: {e}\n\nتفاصيل:\n{traceback.format_exc()}"
-        )
+        error_details = f"❗ فشل التحديث المجدول: {e} (فشل متتالي رقم {count})\n\nتفاصيل:\n{traceback.format_exc()}"
         logger.critical(error_details)
         if os.environ.get("SENTRY_DSN") and SENTRY_AVAILABLE:
             try:
                 sentry_sdk.capture_exception(e)
             except Exception:
                 pass
-        _send_alert(f"فشل التحديث: {str(e)}", severity="critical")
+        _send_alert(
+            f"فشل التحديث: {str(e)} (فشل متتالي رقم {count})", severity="critical"
+        )
+        _consecutive_failures_alert(count)
         raise
     finally:
         logger.info("=" * 60)
