@@ -755,7 +755,7 @@ def validate_scraped_data(
     وتُقبل البيانات، لأنه ممكن يكون حركة سوق حقيقية.
     """
     import constants as C
-    from datetime import datetime, timedelta
+    from datetime import timedelta
 
     if df is None or df.empty:
         raise ValueError("البيانات المسحوبة فارغة - يُمنع الحفظ")
