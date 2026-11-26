@@ -171,7 +171,12 @@ POSTGRES_URI=postgresql://user:pass@localhost:5432/testdb pytest tests/test_post
 python scripts/fake_telegram_server_test.py
 ```
 
-> اختبارا `test_ui.py` و`test_ui_browser_compatibility.py` يحتاجان تطبيق Streamlit شغالًا ومتصفح Playwright مثبتًا.
+> اختبار `test_ui.py` يحتاج تطبيق Streamlit شغالًا على المنفذ 8501 ومتصفح Playwright مثبتًا:
+> ```bash
+> streamlit run app.py --server.headless true --server.port 8501 &
+> pytest
+> ```
+> الـCI بيشغّلهم تلقائيًا مع كل push وPR. واختبارات سيناريوهات اتصال PostgreSQL (`test_pg_pool_scenarios.py`) بتشتغل تلقائيًا بقاعدة مدمجة عبر حزمة pgserver الموجودة في requirements.
 
 ---
 

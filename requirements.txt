@@ -36,4 +36,5 @@ SQLAlchemy==2.0.31             # ORM and database management (ORM وإدارة �
 pytest==9.2.0                  # Testing framework (إطار الاختبار)
 pytest-mock==3.17.0            # Mocking for tests (المحاكاة للاختبارات)
 pytest-asyncio==1.5.0         # Async testing support (دعم الاختبارات المتزامنة)
+pgserver==0.1.4                # PostgreSQL مدمج للاختبارات (يشغّل اختبارات postgres في الـCI)
 

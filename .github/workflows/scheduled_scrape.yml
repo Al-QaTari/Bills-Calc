@@ -6,15 +6,46 @@ on:
 
   # جدولة التشغيل التلقائي
   schedule:
-    # يومي الأحد والخميس، كل ساعة من 4 عصراً حتى 12 مساءً بتوقيت مصر
-    # توقيت UTC هو (13-21)، وهو ما يعادل (16-24) بتوقيت مصر (UTC+3)
+    # GitHub بيشغّل الـ cron بتوقيت UTC ثابت، ومصر بتتغير بين UTC+2 (شتاءً) و UTC+3 (صيفًا).
+    # عشان كده الجدولة واسعة (تغطي الحالتين) وخطوة "gate" تحت بتقارن بالساعة الفعلية
+    # بتوقيت القاهرة (بتتظبط لوحدها مع الـ DST) وتكمّل بس جوه النافذة المطلوبة.
+
+    # يومي الأحد والخميس، كل ساعة من 4 عصراً حتى 12 مساءً بتوقيت القاهرة
     - cron: '0 13-21 * * 0,4'
 
-    # مرة واحدة يومياً الساعة 8 صباحاً بتوقيت مصر (5 UTC) كفحص احتياطي
-    - cron: '0 5 * * *'
+    # مرة واحدة يومياً الساعة 8 صباحاً بتوقيت القاهرة كفحص احتياطي
+    # (5 UTC شتاءً / 6 UTC صيفًا؛ الـ gate بيسيب واحدة بس منهم)
+    - cron: '0 5,6 * * *'
 
 jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - name: Check Cairo local time (DST-aware)
+        id: check
+        env:
+          EVENT: ${{ github.event_name }}
+          CRON: ${{ github.event.schedule }}
+        run: |
+          HOUR=$(TZ=Africa/Cairo date +%-H)
+          echo "Cairo hour now: $HOUR (offset $(TZ=Africa/Cairo date +%z))"
+          RUN=false
+          if [ "$EVENT" != "schedule" ]; then
+            RUN=true
+          elif [ "$CRON" = "0 5,6 * * *" ]; then
+            # الفحص الاحتياطي: الساعة 8 صباحاً بتوقيت القاهرة بالظبط
+            [ "$HOUR" -eq 8 ] && RUN=true
+          else
+            # نافذة العطاء: من 16:00 لحد 24:00 بتوقيت القاهرة
+            if [ "$HOUR" -ge 16 ] || [ "$HOUR" -eq 0 ]; then RUN=true; fi
+          fi
+          echo "run=$RUN" >> "$GITHUB_OUTPUT"
+
   scrape:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
     permissions:
       # هذا الإذن ضروري للسماح لـ git-auto-commit-action بالكتابة على المستودع

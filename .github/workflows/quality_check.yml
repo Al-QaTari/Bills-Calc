@@ -32,8 +32,18 @@ jobs:
       - name: Install Playwright Browsers
         run: playwright install chromium --with-deps
 
-      - name: Run tests (and skip UI tests)
-        run: pytest -m "not ui"
+      # اختبارات الواجهة (test_ui.py) بتتوقع تطبيق Streamlit شغال على المنفذ 8501
+      - name: Start Streamlit app for UI tests
+        run: |
+          nohup streamlit run app.py --server.headless true --server.port 8501 > streamlit.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8501/healthz > /dev/null; then echo "app is up"; break; fi
+            sleep 2
+          done
+          curl -sf http://localhost:8501/healthz > /dev/null || { echo "app failed to start"; cat streamlit.log; exit 1; }
+
+      - name: Run tests
+        run: pytest
 
       - name: Lint with ruff
         run: ruff check .

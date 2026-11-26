@@ -4,6 +4,7 @@ import os
 import threading
 import pandas as pd
 import pytz
+from timeutil import cairo_now
 from typing import Optional, Tuple, List, Dict, Any
 from sqlalchemy import create_engine, text
 import streamlit as st
@@ -506,7 +507,7 @@ class PostgresDBManager(HistoricalDataStore):
 
     def get_daily_update_count(self) -> int:
         try:
-            today_str = datetime.now().strftime("%Y-%m-%d")
+            today_str = cairo_now().strftime("%Y-%m-%d")
             with self._get_connection() as conn:
                 query = text(f"""
                     SELECT COUNT(DISTINCT "{C.SESSION_DATE_COLUMN_NAME}") 

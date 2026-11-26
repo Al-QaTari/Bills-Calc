@@ -5,6 +5,7 @@ import logging
 from typing import Tuple, Optional, List, Dict, Any
 import streamlit as st
 import pytz
+from timeutil import cairo_now
 from sqlalchemy import create_engine, text
 from datetime import datetime, timedelta
 import sys
@@ -501,7 +502,7 @@ class SQLiteDBManager(HistoricalDataStore):
 
     def get_daily_update_count(self) -> int:
         try:
-            today_ddmmyyyy = datetime.now().strftime("%d/%m/%Y")
+            today_ddmmyyyy = cairo_now().strftime("%d/%m/%Y")
 
             with self.engine.connect() as conn:
                 query = text(f"""

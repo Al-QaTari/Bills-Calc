@@ -13,6 +13,7 @@ import streamlit as st
 import pandas as pd
 import pytz
 from datetime import datetime, timedelta
+from html import escape
 from utils import prepare_arabic_text, StateManager
 from dependency_container import container
 from treasury_core.ports import HistoricalDataStore
@@ -35,9 +36,13 @@ def update_data_async(force_refresh: bool = False, is_force_update: bool = False
     st.session_state.update_status = "updating"
 
     if is_force_update:
-        st.session_state.update_message = "🚀 جاري التحديث الشامل من قاعدة البيانات..."
+        st.session_state.update_message = (
+            "🚀 جاري التحديث الشامل من موقع البنك المركزي (مع تجاهل الكاش)..."
+        )
     else:
-        st.session_state.update_message = "🔄 جاري التحديث السريع من قاعدة البيانات..."
+        st.session_state.update_message = (
+            "🔄 جاري التحديث السريع من موقع البنك المركزي..."
+        )
 
     try:
         base_dir = Path(__file__).resolve().parent.parent
@@ -54,42 +59,47 @@ def update_data_async(force_refresh: bool = False, is_force_update: bool = False
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            timeout=60,  # 60 seconds timeout
+            # 5 دقائق: السكربت نفسه بيسمح بـ180 ثانية لجلب البيانات، وزيادة لتشغيل بايثون
+            timeout=300,
         )
 
         if result.returncode == 0:
             st.session_state.update_status = "success"
             if is_force_update:
-                st.session_state.update_message = "✅ تم التحديث الشامل بنجاح - تم تحديث البيانات من قاعدة البيانات PostgreSQL"
+                st.session_state.update_message = "✅ تم التحديث الشامل بنجاح - تم جلب أحدث البيانات من موقع البنك المركزي"
             else:
                 st.session_state.update_message = (
-                    "✅ تم التحديث السريع بنجاح - تم تحديث البيانات من قاعدة البيانات"
+                    "✅ تم التحديث السريع بنجاح - البيانات محدثة من موقع البنك المركزي"
                 )
         else:
             st.session_state.update_status = "failed"
             error_msg = result.stderr if result.stderr else "خطأ غير معروف"
-            if is_force_update:
-                st.session_state.update_message = f"❌ فشل في التحديث الشامل من قاعدة البيانات PostgreSQL\n\nتفاصيل الخطأ:\n{error_msg}"
-            else:
-                st.session_state.update_message = f"❌ فشل في التحديث السريع من قاعدة البيانات\n\nتفاصيل الخطأ:\n{error_msg}"
+            st.session_state.update_message = (
+                f"❌ فشل التحديث من موقع البنك المركزي\n\nتفاصيل الخطأ:\n{error_msg}"
+            )
 
     except subprocess.TimeoutExpired:
         st.session_state.update_status = "failed"
-        if is_force_update:
-            st.session_state.update_message = (
-                "⏰ انتهت مهلة التحديث الشامل من قاعدة البيانات PostgreSQL"
-            )
-        else:
-            st.session_state.update_message = (
-                "⏰ انتهت مهلة التحديث السريع من قاعدة البيانات"
-            )
+        st.session_state.update_message = "⏰ انتهت مهلة التحديث (5 دقائق) - قد يكون موقع البنك المركزي بطيئًا، حاول مرة أخرى"
     except Exception as e:
         st.session_state.update_status = "failed"
         error_details = str(e)
-        if is_force_update:
-            st.session_state.update_message = f"❌ فشل في التحديث الشامل من قاعدة البيانات PostgreSQL\n\nتفاصيل الخطأ:\n{error_details}"
-        else:
-            st.session_state.update_message = f"❌ فشل في التحديث السريع من قاعدة البيانات\n\nتفاصيل الخطأ:\n{error_details}"
+        st.session_state.update_message = (
+            f"❌ فشل التحديث من موقع البنك المركزي\n\nتفاصيل الخطأ:\n{error_details}"
+        )
+
+
+def _shift_days(dt: datetime, days: int) -> datetime:
+    """
+    إضافة أيام لتاريخ مع الحفاظ على الساعة كما هي بتوقيت القاهرة.
+    لو التاريخ فيه tzinfo (pytz) بنعيد حساب الـ offset (UTC+2 / UTC+3) للتاريخ الجديد،
+    عشان تغيير الساعة الصيفية ما يزحزحش النتيجة.
+    """
+    shifted = dt + timedelta(days=days)
+    zone = getattr(dt.tzinfo, "zone", None)
+    if zone:
+        return pytz.timezone(zone).localize(shifted.replace(tzinfo=None))
+    return shifted
 
 
 def get_next_auction_date(today: datetime) -> tuple:
@@ -105,8 +115,8 @@ def get_next_auction_date(today: datetime) -> tuple:
     """
     days_to_thursday = (3 - today.weekday() + 7) % 7
     days_to_sunday = (6 - today.weekday() + 7) % 7
-    next_thursday = today + timedelta(days=days_to_thursday)
-    next_sunday = today + timedelta(days=days_to_sunday)
+    next_thursday = _shift_days(today, days_to_thursday)
+    next_sunday = _shift_days(today, days_to_sunday)
     return (
         (next_thursday, "الخميس")
         if next_thursday.date() < next_sunday.date()
@@ -239,17 +249,17 @@ def render_home_page():
     # تعريف المتغيرين قبل استخدامهما
     next_auction_dt, next_auction_day = get_next_auction_date(now_cairo)
 
-    # Determine update reason
+    # تحذير لو البيانات المعروضة قديمة. العطاءات أحد وخميس بس، فأكبر فجوة طبيعية
+    # 3 أيام (خميس → أحد)؛ التحذير يظهر بعدها عشان منبّهش في الأيام العادية.
+    # بيتعرض جوه بطاقة العطاء القادم (مكان رسالة "يمكنك تحديث البيانات الآن" القديمة)
+    stale_msg = ""
     if last_update_dt:
         days_since = (now_cairo.date() - last_update_dt.date()).days
-        if days_since > 1:
-            pass
-        elif (
-            now_cairo.weekday() in [3, 6] and last_update_dt.date() != now_cairo.date()
-        ):
-            pass
-    else:
-        pass
+        if days_since > 3:
+            stale_msg = (
+                f"ℹ️ البيانات المعروضة آخر تحديث لها {last_update_date} (منذ {days_since} يوم) "
+                "- اضغط «تحديث سريع» لجلب أحدث النتائج."
+            )
 
     # Update button logic - Always allow updates
 
@@ -269,12 +279,16 @@ def render_home_page():
     )
 
     # Calculate and display countdown
-    time_to_auction = next_auction_dt - now_cairo
+    # الفرق بالساعة على الحائط (بدون tzinfo) عشان تغيير DST بين النهارده والعطاء
+    # ما يخليش العداد يزيد أو ينقص ساعة
+    time_to_auction = next_auction_dt.replace(tzinfo=None) - now_cairo.replace(
+        tzinfo=None
+    )
     countdown_str = format_countdown(time_to_auction)
 
-    # Display auction card with status - Always show update available
+    # بطاقة العطاء القادم: رسالة التحذير بتظهر فيها بس لو البيانات قديمة
     card_color = "update-message info"
-    card_msg = "يمكنك تحديث البيانات الآن"
+    card_msg_html = f"<div class='card-msg'>{escape(stale_msg)}</div>" if stale_msg else ""
 
     auction_card = f"""
     <div class='card {card_color}'>
@@ -284,7 +298,7 @@ def render_home_page():
             </span>
         </div>
         <div class='blinking-text countdown-remaining'>⏰ متبقي: {countdown_str}</div>
-        <div class='card-msg'>{card_msg}</div>
+        {card_msg_html}
     </div>
     """
     st.markdown(auction_card, unsafe_allow_html=True)
@@ -344,5 +358,3 @@ def render_home_page():
     if _sun:
         display_auction_results("عطاء الأحد", group_label(_sun), data_df, _sun)
 
-    # Back to top button
-    st.markdown('<a href="#top" class="back-to-top">▲</a>', unsafe_allow_html=True)

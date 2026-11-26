@@ -2,6 +2,7 @@
 import os
 import sys
 import pandas as pd
+from timeutil import cairo_now
 from io import StringIO
 import asyncio
 from typing import Optional, Callable, List, Dict, Any
@@ -727,6 +728,124 @@ class CbeScraper(YieldDataSource):
             return None
 
 
+# =============================================================================
+# فحص معقولية البيانات المسحوبة قبل الحفظ
+# =============================================================================
+# لو البنك المركزي غيّر شكل الصفحة، السكرابر ممكن يقرأ أعمدة غلط (مبالغ بدل عوائد)
+# ويحفظها، فتدخل في الحاسبات وتطلع تنبيهات كاذبة. القيم دي حدود واسعة متستبعدش
+# أي سوق طبيعي، هدفها صيد الأعمدة المتلخبطة مش الأرقام الحقيقية.
+MIN_PLAUSIBLE_YIELD = 0.0  # العائد لازم يكون موجب
+MAX_PLAUSIBLE_YIELD = 60.0  # أعلى من أي عائد تاريخي متوقع بهامش كبير
+MIN_PLAUSIBLE_TENOR_DAYS = 7
+MAX_PLAUSIBLE_TENOR_DAYS = 800
+MAX_FUTURE_SESSION_DAYS = 1  # تاريخ الجلسة مش ممكن يكون في المستقبل
+MAX_YIELD_JUMP_POINTS = 7.0  # قفزة أكبر من كده عن آخر جلسة لنفس الأجل = تحذير
+
+
+def validate_scraped_data(
+    df: pd.DataFrame,
+    previous_data: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    """
+    يتحقق من معقولية البيانات المسحوبة قبل حفظها.
+
+    يرفع ValueError (فلا يُحفظ شيء) لو فيه قيم مستحيلة: أعمدة ناقصة، أرقام غير
+    رقمية، عائد خارج (0, 60]، أجل خارج [7, 800] يوم، أو تاريخ جلسة غير مقروء أو
+    في المستقبل. أما الشذوذ الممكن (قفزة كبيرة عن آخر جلسة) فيُسجَّل كتحذير فقط
+    وتُقبل البيانات، لأنه ممكن يكون حركة سوق حقيقية.
+    """
+    import constants as C
+    from datetime import datetime, timedelta
+
+    if df is None or df.empty:
+        raise ValueError("البيانات المسحوبة فارغة - يُمنع الحفظ")
+
+    tenor_col = getattr(C, "TENOR_COLUMN_NAME", "tenor")
+    yield_col = getattr(C, "YIELD_COLUMN_NAME", "yield")
+    session_col = getattr(C, "SESSION_DATE_COLUMN_NAME", "session_date")
+
+    missing = [c for c in (tenor_col, yield_col, session_col) if c not in df.columns]
+    if missing:
+        raise ValueError(f"أعمدة أساسية ناقصة في البيانات المسحوبة: {missing}")
+
+    out = df.copy()
+    out[tenor_col] = pd.to_numeric(out[tenor_col], errors="coerce")
+    out[yield_col] = pd.to_numeric(out[yield_col], errors="coerce")
+    if out[[tenor_col, yield_col]].isna().any().any():
+        bad = out[out[[tenor_col, yield_col]].isna().any(axis=1)]
+        raise ValueError(
+            f"قيم غير رقمية في الأجل أو العائد ({len(bad)} صف) - احتمال تغيّر شكل صفحة البنك المركزي"
+        )
+
+    bad_yield = out[
+        (out[yield_col] <= MIN_PLAUSIBLE_YIELD) | (out[yield_col] > MAX_PLAUSIBLE_YIELD)
+    ]
+    if not bad_yield.empty:
+        raise ValueError(
+            f"عائد خارج النطاق المعقول ({MIN_PLAUSIBLE_YIELD}, {MAX_PLAUSIBLE_YIELD}]: "
+            f"{bad_yield[yield_col].tolist()} - احتمال قُرئ عمود غلط من الصفحة"
+        )
+
+    bad_tenor = out[
+        (out[tenor_col] < MIN_PLAUSIBLE_TENOR_DAYS)
+        | (out[tenor_col] > MAX_PLAUSIBLE_TENOR_DAYS)
+    ]
+    if not bad_tenor.empty:
+        raise ValueError(
+            f"أجل خارج النطاق المعقول [{MIN_PLAUSIBLE_TENOR_DAYS}, {MAX_PLAUSIBLE_TENOR_DAYS}] يوم: "
+            f"{bad_tenor[tenor_col].tolist()}"
+        )
+
+    session_dt = pd.to_datetime(out[session_col], dayfirst=True, errors="coerce")
+    if session_dt.isna().any():
+        raise ValueError(
+            f"تواريخ جلسة غير مقروءة: {out.loc[session_dt.isna(), session_col].tolist()}"
+        )
+    future_limit = pd.Timestamp(
+        cairo_now() + timedelta(days=MAX_FUTURE_SESSION_DAYS)
+    )
+    if (session_dt > future_limit).any():
+        raise ValueError(
+            f"تاريخ جلسة في المستقبل: {out.loc[session_dt > future_limit, session_col].tolist()}"
+        )
+
+    # فحص تحذيري فقط: قفزة كبيرة عن آخر جلسة محفوظة لنفس الأجل
+    if previous_data is not None and not previous_data.empty:
+        try:
+            prev = previous_data.copy()
+            prev[yield_col] = pd.to_numeric(prev[yield_col], errors="coerce")
+            prev[tenor_col] = pd.to_numeric(prev[tenor_col], errors="coerce")
+            prev = prev.dropna(subset=[yield_col, tenor_col])
+            prev_map = prev.groupby(prev[tenor_col].astype(int))[yield_col].last()
+            for _, row in out.iterrows():
+                old = prev_map.get(int(row[tenor_col]))
+                if (
+                    old is not None
+                    and abs(float(row[yield_col]) - float(old)) > MAX_YIELD_JUMP_POINTS
+                ):
+                    logger.warning(
+                        f"⚠️ قفزة كبيرة في عائد أجل {int(row[tenor_col])}: "
+                        f"من {old} إلى {row[yield_col]} - تُقبل البيانات لكن يُرجى المراجعة"
+                    )
+        except Exception as e:
+            logger.warning(f"تعذر فحص قفزات العائد مقارنة بالجلسة السابقة: {e}")
+
+    logger.info(f"✅ اجتازت البيانات فحص المعقولية ({len(out)} صف)")
+    return out
+
+
+def _load_previous_yields(data_store) -> Optional[pd.DataFrame]:
+    """أحدث بيانات محفوظة للمقارنة التحذيرية، أو None عند التعذر."""
+    try:
+        latest = data_store.load_latest_data()
+        prev_df = latest[0] if isinstance(latest, tuple) else latest
+        if prev_df is not None and not prev_df.empty:
+            return prev_df
+    except Exception as e:
+        logger.warning(f"تعذر تحميل البيانات السابقة للمقارنة: {e}")
+    return None
+
+
 async def fetch_and_update_data_async(
     data_source: CbeScraper,
     data_store: HistoricalDataStore,
@@ -750,6 +869,12 @@ async def fetch_and_update_data_async(
                 status_callback("لم يتم العثور على بيانات جديدة على الموقع")
             _increment_failure_count()
             return False
+
+        # الخطوة 1.5: فحص المعقولية قبل أي حفظ — لو القيم مستحيلة يُرفع ValueError
+        # فلا يُحفظ شيء ويتعامل معه update_data كفشل (تنبيه + عداد الفشل المستمر)
+        latest_data = validate_scraped_data(
+            latest_data, previous_data=_load_previous_yields(data_store)
+        )
 
         if status_callback:
             status_callback("تم الجلب، جاري التحقق من التكرار...")

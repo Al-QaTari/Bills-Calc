@@ -1,0 +1,12 @@
+# تحديثات Dependabot الأسبوعية: اعتمادات بايثون وأكشنز GitHub
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

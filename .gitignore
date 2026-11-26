@@ -41,6 +41,9 @@ build/
 *.log
 *.tmp
 
+# Runtime state of the update script (عداد الفشل المتتالي - بديل الملف المحلي)
+update_state.json
+
 # Backup installation files
 *.bak
 backups/

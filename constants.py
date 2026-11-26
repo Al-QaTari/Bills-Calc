@@ -26,7 +26,7 @@ TABLE_NAME = "cbe_t_bills"
 CBE_DATA_URL = "https://www.cbe.org.eg/ar/auctions/egp-t-bills"
 YIELD_ANCHOR_TEXT = "متوسط العائد المرجح"
 ACCEPTED_BIDS_KEYWORD = "المقبولة"
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
 # Web scraping controls
 SCRAPER_RETRIES = 3
