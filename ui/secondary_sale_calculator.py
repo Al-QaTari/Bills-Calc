@@ -13,6 +13,7 @@ import pytz
 import streamlit as st
 
 import constants as C
+from tenors import active_tenors, calc_days
 from factories import InputModelFactory
 from state_manager import Repository
 from treasury_core.calculations import analyze_secondary_sale
@@ -109,7 +110,7 @@ def render_secondary_sale_calculator():
         with row1_col3:
             original_tenor = st.selectbox(
                 prepare_arabic_text("أجل الإذن الأصلي"),
-                C.TENORS,
+                active_tenors(st.session_state.get("_df_data_for_tenors"), C.TENORS),
                 key="sec_tenor",
             )
 
@@ -140,7 +141,10 @@ def render_secondary_sale_calculator():
 
         row2_col1, row2_col2, row2_col3 = st.columns(3)
         with row2_col1:
-            max_holding = original_tenor - 1
+            tenor_days = calc_days(
+                original_tenor, st.session_state.get("_df_data_for_tenors")
+            )
+            max_holding = tenor_days - 1
             holding_days = st.number_input(
                 prepare_arabic_text("عدد أيام الاحتفاظ"),
                 min_value=1,
@@ -177,7 +181,7 @@ def render_secondary_sale_calculator():
     # --- Dynamic Date Calculation (Updated Logic) ---
     sale_date = datetime.now(pytz.timezone(C.TIMEZONE))
     purchase_date = sale_date - timedelta(days=holding_days)
-    remaining_days = original_tenor - holding_days
+    remaining_days = tenor_days - holding_days
     maturity_date = sale_date + timedelta(days=remaining_days)
 
     st.markdown(
@@ -219,7 +223,7 @@ def render_secondary_sale_calculator():
                 inputs = {
                     "face_value": face_value,
                     "original_yield": original_yield,
-                    "original_tenor": original_tenor,
+                    "original_tenor": tenor_days,
                     "holding_days": holding_days,
                     "secondary_yield": secondary_yield,
                     "tax_rate": tax_rate,

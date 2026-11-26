@@ -135,3 +135,29 @@ render_secondary_sale_calculator()
     at.selectbox(key="sec_tenor").select(273).run()
     assert at.number_input(key="sec_orig_yield").value == 26.289
     assert not at.exception
+
+
+def test_history_view_merges_year_bill_variants():
+    from streamlit.testing.v1 import AppTest
+
+    root = str(Path(__file__).resolve().parent.parent)
+    script = f"""
+import sys
+sys.path.insert(0, {root!r})
+import pandas as pd
+import constants as C
+from state_manager import StateManager
+rows = []
+for t in [91, 357, 364, 336]:
+    for d in ["2026-11-01", "2026-11-08"]:
+        rows.append({{C.TENOR_COLUMN_NAME: t, C.YIELD_COLUMN_NAME: 25.0 + t / 1000,
+                      C.SESSION_DATE_COLUMN_NAME: d, C.DATE_COLUMN_NAME: d}})
+StateManager.set("historical_df", pd.DataFrame(rows))
+from ui.historical_data_view import render_historical_data_view
+render_historical_data_view()
+"""
+    at = AppTest.from_string(script, default_timeout=30).run()
+    assert not at.exception
+    ms = at.multiselect[0]
+    assert len(ms.options) == 2 and len(ms.value) == 2  # 357/364/336 = نفس أذن السنة
+    assert {o.split()[0] for o in ms.options} == {"91", "364"}
