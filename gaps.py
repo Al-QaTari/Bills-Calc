@@ -24,6 +24,8 @@ from tenors import normalize_tenor
 DATE_FORMAT = "%d/%m/%Y"
 WEEK_DAYS = 7
 TUESDAY = 1
+# عمود تاريخ الإصدار الرسمي (نص DD/MM/YYYY، يقبل NULL للصفوف القديمة لحد ما تتملي)
+ISSUE_DATE_COLUMN = "issue_date"
 
 # الأجل الأساسي -> يوم الجلسة المعتاد (Python weekday: الاثنين=0 ... الأحد=6)
 SESSION_WEEKDAY_BY_TENOR = {91: 6, 273: 6, 182: 3, 364: 3}
@@ -44,16 +46,20 @@ def issue_tuesday(session: date) -> date:
     return session + timedelta(days=(TUESDAY - session.weekday()) % WEEK_DAYS)
 
 
-def find_session_gaps(rows: Iterable[Tuple[Any, Any]]) -> List[Dict[str, Any]]:
+def find_session_gaps(rows: Iterable[Tuple[Any, ...]]) -> List[Dict[str, Any]]:
     """
-    rows: أزواج (الأجل، تاريخ الجلسة DD/MM/YYYY).
+    rows: أزواج (الأجل، تاريخ الجلسة DD/MM/YYYY) أو ثلاثيات بتاريخ الإصدار الرسمي
+    كعنصر تالت. لو تاريخ الإصدار موجود وصالح (ثلاثاء) بيتحدد بيه الأسبوع مباشرة، ولو
+    فاضي بيتحسب من تاريخ الجلسة زي الأول."
     الناتج: قايمة فجوات بنفس الشكل القديم (start_date, end_date, missing_dates,
     gap_length) مع tenor_family لتوضيح الأجل المتأثر. missing_dates هي تواريخ الجلسة
     المتوقعة (الأحد أو الخميس) للأسابيع الناقصة.
     الآجال غير الأساسية (غير 91/182/273/364 بعد التوحيد) بتتجاهل.
     """
     weeks_by_weekday: Dict[int, Dict[date, date]] = defaultdict(dict)
-    for tenor, session in rows:
+    for row in rows:
+        tenor, session = row[0], row[1]
+        stated_issue = parse_session_date(row[2]) if len(row) > 2 else None
         nominal = normalize_tenor(tenor)
         if nominal not in SESSION_WEEKDAY_BY_TENOR:
             continue
@@ -61,7 +67,10 @@ def find_session_gaps(rows: Iterable[Tuple[Any, Any]]) -> List[Dict[str, Any]]:
         if parsed is None:
             continue
         family = SESSION_WEEKDAY_BY_TENOR[nominal]
-        week = issue_tuesday(parsed)
+        if stated_issue is not None and stated_issue.weekday() == TUESDAY:
+            week = stated_issue
+        else:
+            week = issue_tuesday(parsed)
         # نحتفظ بأقدم تاريخ جلسة في الأسبوع، للتقرير فقط
         known = weeks_by_weekday[family].get(week)
         if known is None or parsed < known:

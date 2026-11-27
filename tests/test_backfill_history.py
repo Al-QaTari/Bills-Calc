@@ -544,6 +544,11 @@ def test_postgres_end_to_end(monkeypatch, official_file):
             _run("--apply", "--official-json", official_file) == 0
         )  # مرة تانية: ولا صف
         assert dump() == after
+        with db.engine.connect() as conn:
+            empty = conn.execute(
+                text("SELECT count(*) FROM cbe_t_bills WHERE issue_date IS NULL")
+            ).scalar()
+        assert empty == 0  # العمود اتضاف واتملى لكل الصفوف
         assert db.detect_data_gaps() == [] or all(
             g["missing_dates"] != ["23/08/2026"] for g in db.detect_data_gaps()
         )
