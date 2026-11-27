@@ -2,7 +2,6 @@ from datetime import date
 from pathlib import Path
 
 import pandas as pd
-import yaml
 
 import ledger
 import market_compare as mc
@@ -64,19 +63,32 @@ def test_top_summary_counts_confirmed_purchase_amounts():
     assert ledger.top_summary([], date(2026, 9, 1))["invested_confirmed_count"] == 0
 
 
+def _workflow_steps(text):
+    """قسّم الـ workflow لخطوات بالنص (من غير مكتبة yaml، مش موجودة في بيئة الـ CI)."""
+    steps, current = [], None
+    for line in text.splitlines():
+        if line.startswith("      - name:"):
+            current = {"name": line.split(":", 1)[1].strip(), "body": []}
+            steps.append(current)
+        elif current is not None and not line.startswith("      #"):
+            current["body"].append(line)
+    for step in steps:
+        step["text"] = "\n".join(step["body"])
+    return steps
+
+
 def test_scheduled_workflow_runs_backfill_insert_only_and_never_fails_the_scrape():
     path = (
         Path(__file__).resolve().parent.parent
         / ".github/workflows/scheduled_scrape.yml"
     )
-    steps = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]["scrape"]["steps"]
-    names = [s.get("name") for s in steps]
-    step = next(s for s in steps if "backfill_history.py" in s.get("run", ""))
-    assert step["continue-on-error"] is True
-    assert (
-        "--apply" in step["run"] and "sqlite:data/cbe_historical_data.db" in step["run"]
-    )
-    assert step["env"]["POSTGRES_URI"]
+    steps = _workflow_steps(path.read_text(encoding="utf-8"))
+    names = [s["name"] for s in steps]
+    index = next(i for i, s in enumerate(steps) if "backfill_history.py" in s["text"])
+    step = steps[index]["text"]
+    assert "continue-on-error: true" in step
+    assert "--apply" in step and "sqlite:data/cbe_historical_data.db" in step
+    assert "POSTGRES_URI: ${{ secrets.POSTGRES_URI }}" in step
     # بعد التحديث وقبل الـ commit اللي بيحفظ نسخة SQLite
-    assert names.index("Run data update script") < steps.index(step)
-    assert steps.index(step) < names.index("Commit and push if data changed")
+    assert names.index("Run data update script") < index
+    assert index < names.index("Commit and push if data changed")
