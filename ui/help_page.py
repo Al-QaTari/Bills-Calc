@@ -1,4 +1,6 @@
 # ui/help_page.py
+from textwrap import dedent
+
 import streamlit as st
 
 
@@ -9,10 +11,10 @@ def render_help_page():
 
     with st.expander("🔍 ما هي أذون الخزانة؟", expanded=False):
         st.markdown(
-            """
+            dedent("""
             <span class='text-primary'>أذون الخزانة</span> هي أداة استثمارية حكومية قصيرة الأجل تصدرها وزارة المالية وتطرحها البنوك نيابة عن الحكومة لجمع سيولة من السوق المحلي.
             <br><br>
-            **مميزات أذون الخزانة:**
+            <b>مميزات أذون الخزانة:</b>
             <ul>
                 <li>🔒 <span class='text-success'>أمان مرتفع</span>: مضمونة من الحكومة المصرية.</li>
                 <li>💸 <span class='text-warning'>عائد تنافسي</span>: غالباً أعلى من الودائع البنكية.</li>
@@ -21,18 +23,18 @@ def render_help_page():
                 <li>⏳ <span class='text-cyan'>آجال متنوعة</span>: 3 أشهر، 6 أشهر، 9 أشهر، 12 شهر.</li>
             </ul>
             <br>
-            **كيف تعمل؟**<br>
+            <b>كيف تعمل؟</b><br>
             تشتري أذون الخزانة بسعر أقل من قيمتها الاسمية (مثلاً تدفع 95,000 جنيه لتحصل على 100,000 جنيه عند الاستحقاق)، والفرق هو العائد.
             <br><br>
-            **مثال عملي:**<br>
+            <b>مثال عملي:</b><br>
             إذا اشتريت أذون خزانة بقيمة اسمية 100,000 جنيه لمدة 6 أشهر بسعر شراء 95,000 جنيه، ستحصل على 100,000 جنيه عند الاستحقاق، أي أن العائد هو 5,000 جنيه خلال 6 أشهر.
-            """,
+                """),
             unsafe_allow_html=True,
         )
 
     with st.expander("❓ الأسئلة الشائعة (FAQ)", expanded=False):
         st.markdown(
-            """
+            dedent("""
             <ul>
                 <li><b>ما هو الحد الأدنى لشراء أذون الخزانة؟</b><br>الحد الأدنى عادة 25,000 جنيه، ويختلف حسب البنك.</li>
                 <li><b>هل يمكن بيع الأذون قبل الاستحقاق؟</b><br>نعم، يمكن بيعها في السوق الثانوي عبر البنك.</li>
@@ -42,13 +44,13 @@ def render_help_page():
                 <li><b>هل يمكن الشراء للأبناء أو القصر؟</b><br>نعم، عبر حسابات باسمهم في البنك.</li>
                 <li><b>ما الفرق بين أذون وسندات الخزانة؟</b><br>الأذون قصيرة الأجل (حتى سنة)، السندات أطول من سنة.</li>
             </ul>
-            """,
+                """),
             unsafe_allow_html=True,
         )
 
     with st.expander("💡 نصائح للاستثمار الآمن في أذون الخزانة", expanded=False):
         st.markdown(
-            """
+            dedent("""
             <ul>
                 <li>قارن بين عوائد الأذون المختلفة واختر الأنسب لأهدافك.</li>
                 <li>تأكد من مراجعة الشروط مع البنك قبل الشراء.</li>
@@ -56,20 +58,20 @@ def render_help_page():
                 <li>استثمر جزءاً من مدخراتك فقط، ووزع استثماراتك.</li>
                 <li>تابع نتائج المزادات بانتظام للحصول على أفضل العوائد.</li>
             </ul>
-            """,
+                """),
             unsafe_allow_html=True,
         )
 
     with st.expander("🔗 مصادر وروابط رسمية"):
         st.markdown(
-            """
+            dedent("""
             <ul>
                 <li><a href="https://mof.gov.eg/ar/archive/treasuryBills/general/%D8%A3%D8%B0%D9%88%D9%86%20%D8%A7%D9%84%D8%AE%D8%B2%D8%A7%D9%86%D8%A9" target="_blank">أسعار الأوراق المالية الحكومية</a></li>
                 <li><a href="https://www.cbe.org.eg/ar/monetary-policy" target="_blank">سياسة البنك المركزي النقدية</a></li>
                 <li><a href="https://www.cbe.org.eg/ar/monetary-policy/mpc-meetings-schedule" target="_blank">لجنة السياسة النقدية</a></li>
                 <li><a href="https://github.com/Al-QaTari/Bills-Calc" target="_blank">صفحة المشروع على GitHub</a></li>
             </ul>
-            """,
+                """),
             unsafe_allow_html=True,
         )
 

@@ -806,3 +806,48 @@ div[data-testid="stVerticalBlock"] .card,div[data-testid="stHorizontalBlock"] .c
 .admin-alert--default {
     background-color: #6c757d;
 }
+
+/*
+=============================================================================
+| 12. اتجاه موحّد من اليمين لليسار (RTL) لكل البرنامج
+| - ستريمليت بيحط text-align:left على فقرات وقوائم الماركداون، فكان الكلام
+|   العربي يظهر شمال ويمين ووسط حسب القسم. هنا قاعدة واحدة للكل.
+| - الكروت والعناوين المتوسطة عن قصد بتحدد محاذاتها بنفسها فمش بتتأثر.
+=============================================================================
+*/
+.stApp,
+.stApp [data-testid="stMarkdownContainer"],
+.stApp [data-testid="stMarkdown"],
+.stApp [data-testid="stElementContainer"],
+.stApp [data-testid="stCaptionContainer"],
+.stApp [data-testid="stAlert"],
+.stApp [data-testid="stExpanderDetails"],
+.stApp [data-testid="stTabs"],
+.stApp [data-testid="stWidgetLabel"] {
+    direction: rtl;
+    text-align: start;
+}
+.stApp [data-testid="stMarkdownContainer"] > :is(p, ul, ol, blockquote),
+.stApp [data-testid="stMarkdownContainer"] li {
+    direction: rtl;
+    text-align: start;
+}
+.stApp [data-testid="stMarkdownContainer"] > :is(ul, ol) {
+    padding-inline-start: 1.6rem;
+    padding-inline-end: 0;
+    margin-inline-start: 0;
+    list-style-position: outside;
+}
+.stApp [data-testid="stMarkdownContainer"] pre,
+.stApp [data-testid="stMarkdownContainer"] code {
+    direction: ltr;
+    text-align: left;
+    unicode-bidi: isolate;
+}
+.admin-header, .admin-header h3, .admin-metric, .admin-alert, .admin-session-timer {
+    direction: rtl;
+    text-align: start;
+}
+.stApp [data-testid="stMarkdownContainer"] :is(b, strong) {
+    font-weight: 800;
+}
