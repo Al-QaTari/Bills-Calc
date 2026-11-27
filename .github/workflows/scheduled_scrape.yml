@@ -96,6 +96,17 @@ jobs:
           ALERTS_THRESHOLD: ${{ secrets.ALERTS_THRESHOLD || '0.5' }}
         run: python update_data.py
 
+      # --- ملء الجلسات الناقصة تلقائيًا من صفحة "البيانات التاريخية" الرسمية ---
+      # بيضيف الجلسات الناقصة بس (INSERT ... ON CONFLICT DO NOTHING)، مستحيل يعدّل أو يمسح
+      # صف موجود. لو الصفحة الرسمية واقفة بيكتب تحذير ويكمّل. فشله ما بيوقفش الـ workflow.
+      # بيحدّث PostgreSQL ونسخة SQLite اللي بتتحفظ في المستودع (الـ commit تحت).
+      - name: Backfill missing auction sessions (insert-only)
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          POSTGRES_URI: ${{ secrets.POSTGRES_URI }}
+        run: python backfill_history.py --apply --target postgres --target sqlite:data/cbe_historical_data.db
+
       # --- تنبيه استحقاق أذون المحفظة (تجريبي افتراضيًا: dry-run) ---
       # بيشتغل بعد جلب البيانات، وفشله ما بيوقفش الـ workflow (continue-on-error).
       # الإرسال الفعلي بس لو Repository Variable اسمه LEDGER_ALERTS_ENABLED = 1.

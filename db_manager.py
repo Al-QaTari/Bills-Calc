@@ -7,13 +7,13 @@ import streamlit as st
 import pytz
 from timeutil import cairo_now
 from sqlalchemy import create_engine, text
-from datetime import datetime, timedelta
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from treasury_core.ports import HistoricalDataStore
 import constants as C
+from gaps import find_session_gaps
 from tenors import (
     normalize_tenor_column,
     latest_active_rows,
@@ -394,51 +394,11 @@ class SQLiteDBManager(HistoricalDataStore):
         try:
             with self.engine.connect() as conn:
                 query = text(f"""
-                    SELECT DISTINCT "{C.SESSION_DATE_COLUMN_NAME}" 
+                    SELECT DISTINCT "{C.TENOR_COLUMN_NAME}", "{C.SESSION_DATE_COLUMN_NAME}"
                     FROM "{C.TABLE_NAME}"
-                    ORDER BY 
-                        SUBSTR("{C.SESSION_DATE_COLUMN_NAME}", 7, 4) DESC,
-                        SUBSTR("{C.SESSION_DATE_COLUMN_NAME}", 4, 2) DESC,
-                        SUBSTR("{C.SESSION_DATE_COLUMN_NAME}", 1, 2) DESC
                     """)
-                db_dates = [row[0] for row in conn.execute(query).fetchall()]
-
-            if not db_dates:
-                return []
-
-            date_format = "%d/%m/%Y"
-
-            db_date_objects = [datetime.strptime(d, date_format) for d in db_dates]
-
-            db_date_objects.sort()
-
-            gaps = []
-            for i in range(1, len(db_date_objects)):
-                diff = (db_date_objects[i] - db_date_objects[i - 1]).days
-                if diff > 1:
-                    current = db_date_objects[i - 1] + timedelta(days=1)
-                    gap_days = []
-
-                    while current < db_date_objects[i]:
-                        if current.weekday() not in [4, 5]:
-                            gap_days.append(current)
-                        current += timedelta(days=1)
-
-                    if gap_days:
-                        gaps.append(
-                            {
-                                "start_date": db_date_objects[i - 1].strftime(
-                                    date_format
-                                ),
-                                "end_date": db_date_objects[i].strftime(date_format),
-                                "missing_dates": [
-                                    d.strftime(date_format) for d in gap_days
-                                ],
-                                "gap_length": len(gap_days),
-                            }
-                        )
-
-            return gaps
+                rows = [(row[0], row[1]) for row in conn.execute(query).fetchall()]
+            return find_session_gaps(rows)
         except Exception as e:
             logger.error(f"فشل في كشف الفجوات: {str(e)}", exc_info=True)
             return []

@@ -15,6 +15,9 @@ import constants as C
 from tenors import normalize_tenor
 
 MAX_GAP_DAYS = 21
+# الإصدار الثلاثاء والجلسة الأحد أو الخميس (ومعها تأجيل الإجازات): فرق أكبر من 6 أيام
+# معناه إن عطاء أسبوع الإصدار نفسه غالبًا مش مسجل، فالعطاء المعروض أقدم منه.
+NORMAL_MAX_GAP_DAYS = 6
 SAME_TOLERANCE_PP = 0.05  # أقل من كده نقول "زي السوق"
 
 
@@ -87,6 +90,11 @@ def bill_line(cmp: Dict[str, Any]) -> str:
         f"آخر عطاء قبل الإصدار: <bdi dir='ltr'>{cmp['session'].strftime('%d/%m/%Y')}</bdi>"
         f" بعائد {pct(cmp['market_yield'])}"
     )
+    if cmp["gap_days"] > NORMAL_MAX_GAP_DAYS:
+        base += (
+            f"<br>⚠️ العطاء قبل الإصدار بـ {cmp['gap_days']} يوم، "
+            "ممكن عطاء أسبوع الإصدار مش مسجل بعد"
+        )
     if s == "same":
         return f"زي السوق وقتها (تقدير)<br>{base}"
     word = "أحسن" if s == "better" else "أضعف"

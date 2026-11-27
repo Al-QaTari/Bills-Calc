@@ -339,9 +339,14 @@ def render_top_cards(rows) -> None:
         (
             c1,
             "blue",
-            "إجمالي المستثمر (أذون مفتوحة)",
+            (
+                "إجمالي المستثمر (أذون مفتوحة)"
+                if t["invested_confirmed_count"] == t["open_count"]
+                else "إجمالي المستثمر (تقدير)"
+            ),
             format_currency(t["invested"]),
-            f"{t['open_count']} أذن • قيمة اسمية {format_currency(t['face_open'])}",
+            f"{t['open_count']} أذن • قيمة اسمية {format_currency(t['face_open'])}"
+            f" • مؤكد من الكشف {t['invested_confirmed_count']} من {t['open_count']}",
         ),
         (
             c2,

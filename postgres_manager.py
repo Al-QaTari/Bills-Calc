@@ -11,12 +11,12 @@ import streamlit as st
 from dotenv import load_dotenv
 from treasury_core.ports import HistoricalDataStore
 import constants as C
+from gaps import find_session_gaps
 from tenors import (
     normalize_tenor_column,
     latest_active_rows,
     active_tenors,
 )
-from datetime import datetime, timedelta
 
 load_dotenv()
 
@@ -403,47 +403,11 @@ class PostgresDBManager(HistoricalDataStore):
         try:
             with self._get_connection() as conn:
                 query = text(f"""
-                    SELECT "{C.SESSION_DATE_COLUMN_NAME}"
+                    SELECT DISTINCT "{C.TENOR_COLUMN_NAME}", "{C.SESSION_DATE_COLUMN_NAME}"
                     FROM "{C.TABLE_NAME}"
-                    GROUP BY "{C.SESSION_DATE_COLUMN_NAME}"
-                    ORDER BY to_date("{C.SESSION_DATE_COLUMN_NAME}", 'DD/MM/YYYY')
-                """)
-                db_dates = [row[0] for row in conn.execute(query).fetchall()]
-
-            if not db_dates:
-                return []
-
-            date_format = "%d/%m/%Y"
-            db_date_objects = sorted(
-                [datetime.strptime(d, date_format) for d in db_dates]
-            )
-
-            gaps = []
-            for i in range(1, len(db_date_objects)):
-                diff = (db_date_objects[i] - db_date_objects[i - 1]).days
-                if diff > 1:
-                    current = db_date_objects[i - 1] + timedelta(days=1)
-                    gap_days = []
-
-                    while current < db_date_objects[i]:
-                        if current.weekday() not in [4, 5]:  # Friday, Saturday
-                            gap_days.append(current)
-                        current += timedelta(days=1)
-
-                    if gap_days:
-                        gaps.append(
-                            {
-                                "start_date": db_date_objects[i - 1].strftime(
-                                    date_format
-                                ),
-                                "end_date": db_date_objects[i].strftime(date_format),
-                                "missing_dates": [
-                                    d.strftime(date_format) for d in gap_days
-                                ],
-                                "gap_length": len(gap_days),
-                            }
-                        )
-            return gaps
+                    """)
+                rows = [(row[0], row[1]) for row in conn.execute(query).fetchall()]
+            return find_session_gaps(rows)
         except Exception as e:
             logger.error(f"فشل في كشف الفجوات: {str(e)}", exc_info=True)
             return []

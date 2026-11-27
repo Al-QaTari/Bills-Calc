@@ -628,6 +628,10 @@ def top_summary(rows: List[Dict[str, Any]], today: date) -> Dict[str, Any]:
     return {
         "open_count": len(open_rows),
         "invested": invested,
+        # كام أذن مفتوح مبلغ شرائه مؤكد من الكشف (الباقي تقدير من الحاسبة)
+        "invested_confirmed_count": sum(
+            1 for r in open_rows if r.get("actual_purchase_debit") is not None
+        ),
         "face_open": sum(float(r["face_value"]) for r in open_rows),
         "expected_net": sum(expected_net(r) for r in open_rows),
         "nearest": nearest,
