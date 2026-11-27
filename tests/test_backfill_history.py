@@ -549,6 +549,23 @@ def test_postgres_end_to_end(monkeypatch, official_file):
                 text("SELECT count(*) FROM cbe_t_bills WHERE issue_date IS NULL")
             ).scalar()
         assert empty == 0  # العمود اتضاف واتملى لكل الصفوف
+        with db.engine.begin() as conn:  # غلط قديم: صف اتحفظ بوقت التشغيل
+            conn.execute(
+                text(
+                    "UPDATE cbe_t_bills SET scrape_date = now() "
+                    "WHERE tenor=91 AND session_date='23/08/2026'"
+                )
+            )
+        assert _run("--apply", "--official-json", official_file) == 0
+        with db.engine.connect() as conn:
+            fixed = conn.execute(
+                text(
+                    "SELECT scrape_date AT TIME ZONE 'UTC' FROM cbe_t_bills "
+                    "WHERE tenor=91 AND session_date='23/08/2026'"
+                )
+            ).scalar()
+        assert str(fixed) == "2026-08-22 21:00:00"
+        after = dump()
         assert db.detect_data_gaps() == [] or all(
             g["missing_dates"] != ["23/08/2026"] for g in db.detect_data_gaps()
         )

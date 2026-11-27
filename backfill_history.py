@@ -29,7 +29,7 @@ import asyncio
 import os
 import sys
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import constants as C
@@ -85,6 +85,9 @@ class Plan:
     issue_fills: List[Dict[str, Any]] = field(default_factory=list)
     issue_ambiguous: List[Dict[str, Any]] = field(default_factory=list)
     issue_unmatched: int = 0
+    scrape_repairs: List[Dict[str, Any]] = field(default_factory=list)
+    issue_unmatched_rows: List[Dict[str, Any]] = field(default_factory=list)
+    stale_fixes: List[Dict[str, Any]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -231,9 +234,9 @@ def build_plan(
     مطابقة الأسبوع لعطاء تاني.
     """
     issue_map = issue_map or {}
-    db_by_nominal: Dict[int, List[Tuple[date, float, str]]] = {}
-    known_issue: Dict[Tuple[int, date], float] = {}
-    known_issue_exact: Dict[Tuple[int, date], float] = {}
+    db_by_nominal: Dict[int, List[Tuple[date, float, str, int]]] = {}
+    known_issue: Dict[Tuple[int, date], Tuple[float, int, str]] = {}
+    known_issue_exact: Dict[Tuple[int, date], Tuple[float, int, str]] = {}
     db_keys = set()
     for tenor, session_text, yield_pct in db_rows:
         parsed = parse_session_date(session_text)
@@ -242,11 +245,12 @@ def build_plan(
         nominal = normalize_tenor(tenor)
         stored_issue = parse_session_date(issue_map.get((int(tenor), session_text)))
         if stored_issue is not None:
-            known_issue.setdefault((nominal, stored_issue), yield_pct)
-            known_issue_exact[(int(tenor), stored_issue)] = yield_pct
+            entry = (yield_pct, int(tenor), session_text)
+            known_issue.setdefault((nominal, stored_issue), entry)
+            known_issue_exact[(int(tenor), stored_issue)] = entry
         else:
             db_by_nominal.setdefault(nominal, []).append(
-                (parsed, yield_pct, session_text)
+                (parsed, yield_pct, session_text, int(tenor))
             )
         db_keys.add((int(tenor), session_text))
 
@@ -256,11 +260,11 @@ def build_plan(
             plan.skipped_old += 1
             continue
         nominal = normalize_tenor(auction.tenor)
-        stored_yield = known_issue_exact.get((auction.tenor, auction.issue))
-        if stored_yield is None:
-            stored_yield = known_issue.get((nominal, auction.issue))
-        if stored_yield is not None:
-            if abs(stored_yield - auction.yield_pct) <= YIELD_TOLERANCE:
+        stored = known_issue_exact.get((auction.tenor, auction.issue))
+        if stored is None:
+            stored = known_issue.get((nominal, auction.issue))
+        if stored is not None:
+            if abs(stored[0] - auction.yield_pct) <= YIELD_TOLERANCE:
                 plan.already_present += 1
             else:
                 plan.conflicts.append(
@@ -269,16 +273,23 @@ def build_plan(
                         "issue": auction.issue.strftime(DATE_FORMAT),
                         "yield": auction.yield_pct,
                         "db_session": "إصدار " + auction.issue.strftime(DATE_FORMAT),
-                        "db_yield": stored_yield,
+                        "db_yield": stored[0],
+                        "db_rows": [
+                            {
+                                "tenor": stored[1],
+                                "session_date": stored[2],
+                                "yield": stored[0],
+                            }
+                        ],
                     }
                 )
             continue
         window = [
-            (session, y)
-            for session, y, _ in db_by_nominal.get(nominal, [])
+            (session, y, text, row_tenor)
+            for session, y, text, row_tenor in db_by_nominal.get(nominal, [])
             if 0 <= (auction.issue - session).days <= MAX_SESSION_TO_ISSUE_DAYS
         ]
-        if any(abs(y - auction.yield_pct) <= YIELD_TOLERANCE for _, y in window):
+        if any(abs(w[1] - auction.yield_pct) <= YIELD_TOLERANCE for w in window):
             plan.already_present += 1
             continue
         info = {
@@ -289,6 +300,9 @@ def build_plan(
         if window:
             info["db_session"] = window[0][0].strftime(DATE_FORMAT)
             info["db_yield"] = window[0][1]
+            info["db_rows"] = [
+                {"tenor": w[3], "session_date": w[2], "yield": w[1]} for w in window
+            ]
             plan.conflicts.append(info)
             continue
         session, reason = infer_session_date(auction.tenor, auction.issue)
@@ -332,6 +346,117 @@ def check_plan_is_sane(plan: Plan, parsed_count: int, rejected_count: int) -> No
             "نسبة التطابق مع القاعدة منخفضة "
             f"({plan.already_present} من {compared}): القاعدة أو الصفحة مش زي المتوقع"
         )
+
+
+MAX_STALE_FIXES = 20
+
+
+def plan_stale_fixes(official: Sequence[OfficialAuction], plan: Plan) -> None:
+    """صلّح العائد المخزّن لو هو بالظبط نتيجة العطاء اللي قبله بأسبوع (حفظ قديم).
+
+    القاعدة الضيقة: صف في أسبوع إصدار I عائده يساوي (±0.0005) النتيجة الرسمية
+    للإصدار اللي قبله (I - 7 أيام) لنفس الأجل، ومختلف عن نتيجة I الرسمية. ده توقيع
+    سكرابر قديم قرأ الصفحة قبل ما تتحدّث. أي فرق تاني بيفضل تعارض بيتسجّل ومش بيتلمس.
+    """
+    exact = {(a.tenor, a.issue): a.yield_pct for a in official}
+    by_nominal: Dict[Tuple[int, date], List[float]] = {}
+    for a in official:
+        by_nominal.setdefault((normalize_tenor(a.tenor), a.issue), []).append(
+            a.yield_pct
+        )
+    remaining: List[Dict[str, Any]] = []
+    for conflict in plan.conflicts:
+        issue = parse_session_date(conflict["issue"])
+        left = []
+        for row in conflict.get("db_rows", []):
+            previous = (
+                exact.get((conflict["tenor"], issue - timedelta(days=7)))
+                if issue
+                else None
+            )
+            if previous is None and issue:
+                options = by_nominal.get(
+                    (normalize_tenor(conflict["tenor"]), issue - timedelta(days=7)), []
+                )
+                previous = options[0] if len(options) == 1 else None
+            is_stale = (
+                previous is not None
+                and abs(row["yield"] - previous) <= YIELD_TOLERANCE
+                and abs(row["yield"] - conflict["yield"]) > YIELD_TOLERANCE
+            )
+            if is_stale:
+                plan.stale_fixes.append(
+                    {
+                        "tenor": row["tenor"],
+                        "session_date": row["session_date"],
+                        "old": row["yield"],
+                        "new": conflict["yield"],
+                        "issue": conflict["issue"],
+                    }
+                )
+            else:
+                left.append(row)
+        if not conflict.get("db_rows") or left:
+            conflict["db_rows"] = left
+            remaining.append(conflict)
+    plan.conflicts = remaining
+
+
+# اتفاق التطبيق: scrape_date = بداية يوم الجلسة بتوقيت القاهرة، متحوّلة لـ UTC
+# (زي ما السكرابر بيعمل بالظبط). الرسم البياني والفلاتر بيقروا العمود ده كتاريخ العطاء.
+SCRAPE_DATE_REPAIR_AFTER_DAYS = 3
+
+
+def expected_scrape_utc(session_text: str) -> datetime:
+    """بداية يوم الجلسة بتوقيت القاهرة بالـ UTC (نفس حساب cbe_scraper)."""
+    import pandas as pd
+
+    parsed = parse_session_date(session_text)
+    if parsed is None:
+        raise ValueError(f"تاريخ جلسة غير صالح: {session_text!r}")
+    stamp = pd.Timestamp(parsed).tz_localize(
+        "Africa/Cairo", ambiguous=True, nonexistent="shift_forward"
+    )
+    return stamp.tz_convert("UTC").to_pydatetime()
+
+
+def _as_utc(value: Any) -> Optional[datetime]:
+    import pandas as pd
+
+    try:
+        stamp = pd.to_datetime(value, utc=True)
+    except (TypeError, ValueError):
+        return None
+    if pd.isna(stamp):
+        return None
+    return stamp.to_pydatetime()
+
+
+def plan_scrape_repairs(
+    scrape_map: Dict[Tuple[int, str], Any],
+) -> List[Dict[str, Any]]:
+    """صفوف تاريخها (scrape_date) متأخر عن يوم جلستها بأكتر من 3 أيام.
+
+    ده بالظبط الغلط اللي حصل في صفوف الملء الأولى (اتخزنت بوقت التشغيل بدل يوم
+    الجلسة، فظهرت في الرسم البياني على آخر التاريخ). الصفوف العادية فرقها يوم واحد
+    بالظبط، فمفيش خطر إنها تتلمس. بنصلّح scrape_date بس وبالقيمة المتوقعة.
+    """
+    repairs: List[Dict[str, Any]] = []
+    for (tenor, session_text), raw in sorted(scrape_map.items()):
+        actual = _as_utc(raw)
+        if actual is None or parse_session_date(session_text) is None:
+            continue
+        expected = expected_scrape_utc(session_text)
+        if actual - expected > timedelta(days=SCRAPE_DATE_REPAIR_AFTER_DAYS):
+            repairs.append(
+                {
+                    "tenor": tenor,
+                    "session_date": session_text,
+                    "scrape_date": expected,
+                    "old": actual,
+                }
+            )
+    return repairs
 
 
 def plan_issue_fills(
@@ -392,6 +517,9 @@ def plan_issue_fills(
             )
         else:
             plan.issue_unmatched += 1
+            plan.issue_unmatched_rows.append(
+                {"tenor": int(tenor), "session_date": session_text, "yield": yield_pct}
+            )
 
     for key, exact_tenor, issue, _ in candidates:
         claimed.setdefault((exact_tenor, issue), []).append(key)
@@ -490,6 +618,93 @@ def load_issue_dates(conn) -> Dict[Tuple[int, str], Optional[str]]:
     return {(int(t), str(s)): (str(i) if i else None) for t, s, i in result.fetchall()}
 
 
+def load_scrape_dates(conn) -> Dict[Tuple[int, str], Any]:
+    from sqlalchemy import text
+
+    result = conn.execute(
+        text(
+            f'SELECT "{C.TENOR_COLUMN_NAME}", "{C.SESSION_DATE_COLUMN_NAME}", '
+            f'"{C.DATE_COLUMN_NAME}" FROM "{C.TABLE_NAME}"'
+        )
+    )
+    return {(int(t), str(s)): d for t, s, d in result.fetchall()}
+
+
+def _scrape_param(kind: str, value: datetime) -> Any:
+    return value.strftime("%Y-%m-%d %H:%M:%S+00:00") if kind == "sqlite" else value
+
+
+def apply_scrape_repairs(conn, kind: str, repairs: Sequence[Dict[str, Any]]) -> int:
+    """UPDATE لعمود scrape_date بس، وللصف اللي لسه متأخر عن القيمة المتوقعة بأكتر من 3 أيام."""
+    from sqlalchemy import text
+
+    statement = text(
+        f'UPDATE "{C.TABLE_NAME}" SET "{C.DATE_COLUMN_NAME}" = :value '
+        f'WHERE "{C.TENOR_COLUMN_NAME}" = :tenor '
+        f'AND "{C.SESSION_DATE_COLUMN_NAME}" = :session '
+        f'AND "{C.DATE_COLUMN_NAME}" > :cutoff'
+    )
+    updated = 0
+    for row in repairs:
+        cutoff = row["scrape_date"] + timedelta(days=SCRAPE_DATE_REPAIR_AFTER_DAYS)
+        result = conn.execute(
+            statement,
+            {
+                "value": _scrape_param(kind, row["scrape_date"]),
+                "tenor": int(row["tenor"]),
+                "session": row["session_date"],
+                "cutoff": _scrape_param(kind, cutoff),
+            },
+        )
+        updated += max(result.rowcount, 0)
+    return updated
+
+
+def apply_stale_fixes(conn, fixes: Sequence[Dict[str, Any]]) -> int:
+    """UPDATE لعمود العائد بس، لصف عائده لسه القيمة القديمة المتوقعة."""
+    from sqlalchemy import text
+
+    statement = text(
+        f'UPDATE "{C.TABLE_NAME}" SET "{C.YIELD_COLUMN_NAME}" = :new '
+        f'WHERE "{C.TENOR_COLUMN_NAME}" = :tenor '
+        f'AND "{C.SESSION_DATE_COLUMN_NAME}" = :session '
+        f'AND ABS("{C.YIELD_COLUMN_NAME}" - :old) < 0.0005'
+    )
+    updated = 0
+    for row in fixes:
+        result = conn.execute(
+            statement,
+            {
+                "new": float(row["new"]),
+                "tenor": int(row["tenor"]),
+                "session": row["session_date"],
+                "old": float(row["old"]),
+            },
+        )
+        updated += max(result.rowcount, 0)
+    return updated
+
+
+def verify_scrape_dates(
+    before: Dict[Tuple[int, str], Any],
+    after: Dict[Tuple[int, str], Any],
+    repairs: Sequence[Dict[str, Any]],
+    inserted_rows: Sequence[Dict[str, Any]],
+) -> List[str]:
+    """أي scrape_date مش في خطة التصليح ما اتغيّرش، وكل مصلَّح وكل صف جديد قيمته المتوقعة."""
+    problems: List[str] = []
+    fixed = {(int(r["tenor"]), r["session_date"]) for r in repairs}
+    for key, old in before.items():
+        if key in fixed:
+            continue
+        if _as_utc(after.get(key)) != _as_utc(old):
+            problems.append(f"scrape_date اتغيّر لصف مش في الخطة: {key}")
+    for key in fixed | {(int(r["tenor"]), r["session_date"]) for r in inserted_rows}:
+        if _as_utc(after.get(key)) != expected_scrape_utc(key[1]):
+            problems.append(f"scrape_date مش بالقيمة المتوقعة: {key}")
+    return problems
+
+
 def apply_issue_fills(conn, fills: Sequence[Dict[str, Any]]) -> int:
     """UPDATE لعمود issue_date بس، وللصف الفاضي بس (IS NULL). بيرجّع عدد الصفوف."""
     from sqlalchemy import text
@@ -540,10 +755,6 @@ def insert_missing(conn, kind: str, rows: Sequence[Dict[str, Any]]) -> int:
     """INSERT ... ON CONFLICT DO NOTHING لكل صف. يرجّع عدد الصفوف اللي اتكتبت فعلًا."""
     from sqlalchemy import text
 
-    now = datetime.now(timezone.utc)
-    scrape_value: Any = (
-        now.strftime("%Y-%m-%d %H:%M:%S+00:00") if kind == "sqlite" else now
-    )
     statement = text(
         f'INSERT INTO "{C.TABLE_NAME}" '
         f'("{C.TENOR_COLUMN_NAME}", "{C.YIELD_COLUMN_NAME}", '
@@ -559,7 +770,9 @@ def insert_missing(conn, kind: str, rows: Sequence[Dict[str, Any]]) -> int:
                 "tenor": int(row["tenor"]),
                 "yield": float(row["yield"]),
                 "session_date": row["session_date"],
-                "scrape_date": scrape_value,
+                "scrape_date": _scrape_param(
+                    kind, expected_scrape_utc(row["session_date"])
+                ),
                 "issue_date": row["issue"],
             },
         )
@@ -618,6 +831,29 @@ def format_report(plan: Plan, since: date, apply: bool, label: str = "") -> str:
         )
     if len(plan.issue_fills) > 5:
         lines.append(f"  ~ ... و{len(plan.issue_fills) - 5} صف تاني")
+    if plan.stale_fixes:
+        lines.append(
+            f"تصليح عائد محفوظ قديم (= نتيجة الأسبوع اللي قبله بالظبط): {len(plan.stale_fixes)}"
+        )
+        for row in plan.stale_fixes:
+            lines.append(
+                f"  ~ أجل {row['tenor']} | جلسة {row['session_date']} | "
+                f"{row['old']}% -> {row['new']}% (إصدار {row['issue']})"
+            )
+    for row in plan.issue_unmatched_rows[:20]:
+        lines.append(
+            f"  ? صف مالوش مطابقة رسمية: أجل {row['tenor']} | جلسة {row['session_date']} | عائد {row['yield']}%"
+        )
+    if len(plan.issue_unmatched_rows) > 20:
+        lines.append(f"  ? ... و{len(plan.issue_unmatched_rows) - 20} صف تاني")
+    if plan.scrape_repairs:
+        lines.append(
+            f"تصليح تاريخ الحفظ (scrape_date) لصفوف اتحفظت بوقت التشغيل: {len(plan.scrape_repairs)}"
+        )
+        for row in plan.scrape_repairs[:5]:
+            lines.append(
+                f"  ~ أجل {row['tenor']} | جلسة {row['session_date']} -> {row['scrape_date']:%Y-%m-%d %H:%M} UTC"
+            )
     for row in plan.issue_ambiguous:
         lines.append(
             f"  ? إصدار غامض: أجل {row['tenor']} جلسة {row['session_date']} ({row['reason']})"
@@ -659,6 +895,7 @@ class Target:
     db_rows: List[Tuple[int, str, float]]
     since: date
     issue_map: Dict[Tuple[int, str], Optional[str]] = field(default_factory=dict)
+    scrape_map: Dict[Tuple[int, str], Any] = field(default_factory=dict)
 
 
 def _open_target(spec: str, since_arg: Optional[str]) -> Target:
@@ -667,6 +904,7 @@ def _open_target(spec: str, since_arg: Optional[str]) -> Target:
         with engine.connect() as conn:
             db_rows = load_db_rows(conn)
             issue_map = load_issue_dates(conn)
+            scrape_map = load_scrape_dates(conn)
         if not db_rows:
             raise RuntimeError("جدول العوائد فاضي: ده مش المكان المناسب للملء التاريخي")
         db_dates = [d for d in (parse_session_date(s) for _, s, _ in db_rows) if d]
@@ -675,7 +913,7 @@ def _open_target(spec: str, since_arg: Optional[str]) -> Target:
         since = parse_session_date(since_arg) if since_arg else min(db_dates)
         if since is None:
             raise RuntimeError("--since لازم تكون بصيغة DD/MM/YYYY")
-        return Target(spec, engine, kind, db_rows, since, issue_map)
+        return Target(spec, engine, kind, db_rows, since, issue_map, scrape_map)
     except Exception:
         engine.dispose()
         raise
@@ -690,7 +928,19 @@ def _process_target(
     max_insert: int,
 ) -> int:
     plan = build_plan(official, target.db_rows, target.since, today, target.issue_map)
-    plan_issue_fills(official, target.db_rows, target.issue_map, plan)
+    plan_stale_fixes(official, plan)
+    if len(plan.stale_fixes) > MAX_STALE_FIXES:
+        raise RuntimeError(
+            f"عدد تصليحات العائد {len(plan.stale_fixes)} أكبر من الحد {MAX_STALE_FIXES}: لم يتم تنفيذ شيء"
+        )
+    fixed_yield = {
+        (int(f["tenor"]), f["session_date"]): float(f["new"]) for f in plan.stale_fixes
+    }
+    rows_after_fix = [
+        (t, s, fixed_yield.get((int(t), s), y)) for t, s, y in target.db_rows
+    ]
+    plan_issue_fills(official, rows_after_fix, target.issue_map, plan)
+    plan.scrape_repairs = plan_scrape_repairs(target.scrape_map)
     print(format_report(plan, target.since, apply=apply, label=target.name))
     check_plan_is_sane(plan, len(official), rejected_count)
     for row in plan.conflicts:
@@ -698,6 +948,11 @@ def _process_target(
             "warning",
             f"[{target.name}] تعارض عائد أجل {row['tenor']} إصدار {row['issue']}: "
             f"الرسمي {row['yield']}% والقاعدة {row['db_yield']}% (لم يتم تعديل شيء)",
+        )
+    for row in plan.issue_unmatched_rows[:10]:
+        _annotate(
+            "warning",
+            f"[{target.name}] صف مالوش مطابقة رسمية: أجل {row['tenor']} جلسة {row['session_date']} عائد {row['yield']}%",
         )
     for row in plan.needs_review:
         _annotate(
@@ -711,7 +966,12 @@ def _process_target(
         )
     if not apply:
         return 0
-    if not plan.to_insert and not plan.issue_fills:
+    if (
+        not plan.to_insert
+        and not plan.issue_fills
+        and not plan.scrape_repairs
+        and not plan.stale_fixes
+    ):
         print(f"[{target.name}] لا يوجد ما يُضاف أو يتملي.")
         return 0
     if len(plan.to_insert) > max_insert:
@@ -722,25 +982,40 @@ def _process_target(
         print(f"[{target.name}] اتضاف عمود {ISSUE_DATE_COLUMN} (فاضي لحد ما يتملي).")
     with target.engine.connect() as conn:
         with conn.begin():
+            fixed = apply_stale_fixes(conn, plan.stale_fixes)
             filled = apply_issue_fills(conn, plan.issue_fills)
+            repaired = apply_scrape_repairs(conn, target.kind, plan.scrape_repairs)
             inserted = insert_missing(conn, target.kind, plan.to_insert)
     with target.engine.connect() as conn:
         after = load_db_rows(conn)
         after_issue = load_issue_dates(conn)
-    problems = verify_after_apply(target.db_rows, after, plan.to_insert)
+        after_scrape = load_scrape_dates(conn)
+    problems = verify_after_apply(rows_after_fix, after, plan.to_insert)
     problems += verify_issue_dates(
         target.issue_map, after_issue, plan.issue_fills, plan.to_insert
     )
-    if problems or inserted != len(plan.to_insert) or filled != len(plan.issue_fills):
+    problems += verify_scrape_dates(
+        target.scrape_map, after_scrape, plan.scrape_repairs, plan.to_insert
+    )
+    if (
+        problems
+        or inserted != len(plan.to_insert)
+        or filled != len(plan.issue_fills)
+        or repaired != len(plan.scrape_repairs)
+        or fixed != len(plan.stale_fixes)
+    ):
         for problem in problems:
             print(f"[{target.name}] خطأ تحقق: {problem}")
         print(
             f"[{target.name}] اتضاف {inserted} من {len(plan.to_insert)}"
             f" واتملى إصدار {filled} من {len(plan.issue_fills)}"
+            f" واتصلّح تاريخ حفظ {repaired} من {len(plan.scrape_repairs)}"
+            f" واتصلّح عائد {fixed} من {len(plan.stale_fixes)}"
         )
         return 1
     print(
-        f"[{target.name}] تم إضافة {inserted} صف وتعبئة تاريخ إصدار {filled} صف والتحقق منهم."
+        f"[{target.name}] تم إضافة {inserted} صف وتعبئة تاريخ إصدار {filled} صف"
+        f" وتصليح تاريخ حفظ {repaired} صف وتصليح عائد {fixed} صف والتحقق منهم."
     )
     return 0
 
