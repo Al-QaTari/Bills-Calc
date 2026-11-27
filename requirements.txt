@@ -3,7 +3,7 @@
 # =============================================================================
 streamlit==1.65.0              # User interface (واجهة المستخدم)
 pandas==2.3.1                  # Data processing (معالجة البيانات)
-pytz==2024.1                   # Time zones (المناطق الزمنية)
+pytz==2024.2                   # Time zones (المناطق الزمنية)
 pydantic==2.8.2                # Input validation and models (التحقق من المدخلات والنماذج)
 python-dotenv==1.2.4           # Environment variables loading (تحميل متغيرات البيئة)
 requests==2.34.2               # HTTP requests (طلبات HTTP)
