@@ -281,3 +281,23 @@ div[data-testid="stExpander"] summary svg { color: var(--accent-text) !important
 
 /* حقل الرقم: حدود التركيز الحمرا الافتراضية من Streamlit بتتغير للون التوهج بدل ما تظهر كأنها خطأ */
 [data-testid="stNumberInputContainer"]:focus-within{ border-color: rgba(var(--glow-rgb), .9) !important; }
+
+/* ===== إزالة الفراغ فوق العنوان =====
+   السبب: كل st.markdown/st.html بيحقن <style> أو <script> بيعمل حاوية ارتفاعها صفر،
+   وStreamlit بيحط بين كل حاويتين فجوة (16px). 5 حاويات فاضية = حوالي 80px فراغ،
+   فوقهم padding افتراضي 96px للصفحة. الحاويات دي بتتخفي (الـ CSS شغال زي ما هو). */
+[data-testid="stElementContainer"]:has(> [data-testid="stMarkdown"] [data-testid="stMarkdownContainer"] > style:only-child),
+[data-testid="stElementContainer"]:has(> [data-testid="stHtml"] > script:only-child),
+[data-testid="stElementContainer"]:has(> [data-testid="stEmpty"]:only-child){
+    display: none !important;
+}
+[data-testid="stMainBlockContainer"], .block-container{
+    padding-top: 4rem !important;
+}
+@media (max-width: 640px){
+    [data-testid="stMainBlockContainer"], .block-container{
+        padding-top: 3.5rem !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+    }
+}

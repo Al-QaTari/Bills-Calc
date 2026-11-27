@@ -29,6 +29,7 @@ from treasury_core.ports import HistoricalDataStore, YieldDataSource
 from ui.home_page import render_home_page
 from ui.primary_yield_calculator import render_primary_yield_calculator
 from ui.secondary_sale_calculator import render_secondary_sale_calculator
+from ui.portfolio import render_portfolio
 from ui.historical_data_view import render_historical_data_view
 from ui.help_page import render_help_page
 from secret_admin_panel import render_secret_admin_panel
@@ -177,6 +178,15 @@ def main():
         "حاسبة البيع الثانوي",
         "حساب قيمة البيع في السوق الثانوي قبل تاريخ الاستحقاق",
         render_secondary_sale_calculator,
+    )
+    render_section_divider()
+
+    # Render Portfolio Ledger (محمي بكلمة مرور)
+    render_section(
+        "📒",
+        "محفظتي",
+        "سجل أذون الخزانة اللي اشتريتها وأرباحها (محمي بكلمة مرور)",
+        render_portfolio,
     )
     render_section_divider()
 

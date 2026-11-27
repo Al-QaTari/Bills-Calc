@@ -17,6 +17,7 @@ from tenors import active_tenors, calc_days
 from factories import InputModelFactory
 from state_manager import Repository
 from treasury_core.calculations import analyze_secondary_sale
+from ui.portfolio import render_sale_to_ledger
 from treasury_core.models import SecondarySaleResult
 from utils import format_currency, prepare_arabic_text, validate_face_value
 
@@ -244,6 +245,10 @@ def render_secondary_sale_calculator():
 
     if result_to_display:
         display_secondary_results(result_to_display)
+        st.caption(
+            "الأرقام هنا قبل رسوم البنك. رسوم البيع والحفظ بتتحسب في «محفظتي» لما تسجل البيع."
+        )
+        render_sale_to_ledger(secondary_results_repo.get("inputs"), result_to_display)
 
     # --- قسم شرح المعادلات (قابل للطي) ---
     with st.expander("🔍 شرح المعادلات والمصطلحات"):
