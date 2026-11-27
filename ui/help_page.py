@@ -1,7 +1,5 @@
 # ui/help_page.py
 import streamlit as st
-from utils import prepare_arabic_text, format_currency, validate_face_value
-import constants as C
 
 
 def render_help_page():
@@ -58,57 +56,6 @@ def render_help_page():
                 <li>استثمر جزءاً من مدخراتك فقط، ووزع استثماراتك.</li>
                 <li>تابع نتائج المزادات بانتظام للحصول على أفضل العوائد.</li>
             </ul>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with st.expander("🧮 تقدير رسوم أمين الحفظ"):
-        st.markdown(
-            """
-            <div class="card fee-card">
-                <div class="fee-card-header">
-                    <span class="fee-card-icon">🏦</span>
-                    <span class="fee-card-title">رسوم أمين الحفظ البنكي</span>
-                </div>
-                <div class="fee-card-description">
-                    تحتفظ البنوك بأذون الخزانة الخاصة بك مقابل رسوم خدمة دورية يمكنك حسابها هنا 
-                </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        fee_col1, fee_col2 = st.columns(2)
-        with fee_col1:
-            total_face_value = st.number_input(
-                prepare_arabic_text("إجمالي القيمة الإسمية لكل أذونك"),
-                min_value=0.0,
-                value=25000.0,
-                step=C.T_BILL_AMOUNT_STEP,
-                key="fee_calc_total",
-            )
-        with fee_col2:
-            fee_percentage = st.number_input(
-                prepare_arabic_text("نسبة رسوم الحفظ السنوية (%)"),
-                min_value=0.0,
-                value=0.02,
-                step=0.01,
-                format="%.2f",
-                key="fee_calc_perc",
-            )
-        fee_value_error = validate_face_value(total_face_value)
-        if fee_value_error:
-            st.error(prepare_arabic_text(fee_value_error))
-        annual_fee = total_face_value * (fee_percentage / 100.0)
-        monthly_deduction = annual_fee / 12 if not fee_value_error else 0.0
-        st.markdown(
-            f"""
-                <div class='fee-results-container'>
-                    <div class='fee-results-label'>الخصم الشهري التقريبي</div>
-                    <div class='insight-card fee-results-value'>
-                        {format_currency(monthly_deduction)} 
-                    </div>
-                    <div class='fee-results-note'>* عمولة الحفظ على أذون الخزانة في البنك الأهلي: 2 في العشرة آلاف سنويًا (0.02%)، تُحصَّل شهريًا (جدول أمين الحفظ للأفراد). تُضاف رسوم عند الشراء أو البيع (2.5 في المائة ألف، بحد أقصى 1000 جنيه) وعند الاسترداد (1 في الألف، بحد أقصى 1000 جنيه). قد تختلف النسب في بنك آخر.</div>
-                </div>
-            </div>
             """,
             unsafe_allow_html=True,
         )

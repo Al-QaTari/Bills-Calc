@@ -96,6 +96,20 @@ jobs:
           ALERTS_THRESHOLD: ${{ secrets.ALERTS_THRESHOLD || '0.5' }}
         run: python update_data.py
 
+      # --- تنبيه استحقاق أذون المحفظة (تجريبي افتراضيًا: dry-run) ---
+      # بيشتغل بعد جلب البيانات، وفشله ما بيوقفش الـ workflow (continue-on-error).
+      # الإرسال الفعلي بس لو Repository Variable اسمه LEDGER_ALERTS_ENABLED = 1.
+      # الأسرار: POSTGRES_URI و TELEGRAM_BOT_TOKEN و TELEGRAM_CHAT_ID (موجودين بالفعل).
+      - name: Ledger maturity alert (dry-run unless enabled)
+        continue-on-error: true
+        timeout-minutes: 3
+        env:
+          POSTGRES_URI: ${{ secrets.POSTGRES_URI }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          LEDGER_ALERTS_ENABLED: ${{ vars.LEDGER_ALERTS_ENABLED || '0' }}
+        run: python scripts/ledger_maturity_alert.py
+
       # --- التعديل الثاني: إضافة فترة انتظار لمنع تضارب قفل الملف ---
       - name: Wait for file lock to release
         run: sleep 5s

@@ -8,6 +8,8 @@ from treasury_core.models import PrimaryYieldResult
 import constants as C
 from tenors import active_tenors, calc_days
 from decimal import Decimal
+import ledger
+from ui.portfolio import remember_calculation, render_save_to_ledger
 
 # إنشاء خزان للنتائج
 primary_results_repo = Repository[PrimaryYieldResult]("primary_yield")
@@ -151,6 +153,8 @@ def render_primary_yield_calculator():
                 )
                 result = calculate_primary_yield(input_model)
                 primary_results_repo.save("latest", result)
+                _days = calc_days(tenor, st.session_state.get("_df_data_for_tenors"))
+                remember_calculation(face_value, yield_rate, _days, tax_rate, result)
                 display_primary_results(
                     result,
                     face_value,
@@ -162,6 +166,9 @@ def render_primary_yield_calculator():
             st.error(f"خطأ في الحساب: {str(e)}")
     elif not face_value_error and primary_results_repo.exists("latest"):
         display_primary_results(primary_results_repo.get("latest"))
+
+    if primary_results_repo.exists("latest"):
+        render_save_to_ledger()
 
 
 def display_primary_results(
@@ -215,6 +222,21 @@ def display_primary_results(
         st.markdown(
             f"<div class='metric-card cyan'><span class='metric-title'>نسبة الربح الحقيقية</span><span class='metric-value'>{result.real_profit_percentage:.2f}%</span></div>",
             unsafe_allow_html=True,
+        )
+
+    if face_value is not None and tenor:
+        fees = ledger.fee_estimates(float(face_value), int(tenor))
+        st.markdown(
+            f"<div class='metric-card-container-centered'><div class='metric-card cyan'>"
+            f"<span class='metric-title'>صافي الربح بعد الرسوم (تقدير)</span>"
+            f"<span class='metric-value'>{format_currency(result.net_return - fees['total'])}</span></div></div>",
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            f"الرسوم التقديرية: شراء {format_currency(fees['purchase'])} + استحقاق "
+            f"{format_currency(fees['redemption'])} + حفظ {format_currency(fees['custody'])} "
+            f"= {format_currency(fees['total'])}. حسب جدول رسوم أمين الحفظ، ولا تشمل الرسوم السيادية. "
+            "تقدر تسجل الشراء في «محفظتي» بزر «اشتريت هذا الأذن» تحت."
         )
 
     st.info(
