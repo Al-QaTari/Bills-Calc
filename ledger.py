@@ -538,6 +538,28 @@ def rows_to_csv(rows: List[Dict[str, Any]]) -> str:
     return buf.getvalue()
 
 
+def number_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    رقم العرض للأذون: 1 و2 و3... بترتيب التسجيل، من الأذون الموجودة فعلاً.
+    ده للعرض بس. رقم القاعدة (id) بيفضل زي ما هو ومابيتغيرش، فلو اتمسح أذن
+    الأرقام بتتحسب من جديد، ولو اتمسحوا كلهم الأذن الجديد بيبقى رقم 1.
+    """
+    for n, r in enumerate(sorted(rows, key=lambda x: x["id"]), start=1):
+        r["no"] = n
+    return rows
+
+
+def display_no(r: Dict[str, Any]) -> int:
+    """رقم العرض للأذن (من number_rows)."""
+    return r["no"] if "no" in r else r["id"]
+
+
+def _numbers_by_id(rows: List[Dict[str, Any]]) -> Dict[int, int]:
+    return {
+        r["id"]: n for n, r in enumerate(sorted(rows, key=lambda x: x["id"]), start=1)
+    }
+
+
 def report_to_csv(rep: "AnnualReport") -> str:
     """التقرير السنوي كـ CSV: الأذون اللي نزلت فلوسها في السنة + سطر الإجمالي."""
     import csv
@@ -546,12 +568,12 @@ def report_to_csv(rep: "AnnualReport") -> str:
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(
-        ["id", "tenor_days", "face_value", "credit_date", "gross", "tax", "fees", "net"]
+        ["no", "tenor_days", "face_value", "credit_date", "gross", "tax", "fees", "net"]
     )
     for r in rep.realized_rows:
         w.writerow(
             [
-                r["id"],
+                display_no(r),
                 r["tenor_days"],
                 r["face_value"],
                 r["actual_credit_date"],
@@ -642,6 +664,7 @@ def top_summary(rows: List[Dict[str, Any]], today: date) -> Dict[str, Any]:
 def timeline_items(rows: List[Dict[str, Any]], today: date) -> List[Dict[str, Any]]:
     """لكل أذن: شريط من الإصدار للاستحقاق، نسبة اللي عدّى، والحالة."""
     items = []
+    nums = _numbers_by_id(rows)
     for r in rows:
         total = max((r["maturity_date"] - r["issue_date"]).days, 1)
         passed = (today - r["issue_date"]).days
@@ -652,6 +675,7 @@ def timeline_items(rows: List[Dict[str, Any]], today: date) -> List[Dict[str, An
         items.append(
             {
                 "id": r["id"],
+                "no": nums[r["id"]],
                 "status": st_,
                 "pct": round(pct, 1),
                 "days_left": (r["maturity_date"] - today).days,
@@ -694,6 +718,7 @@ def due_alerts(
     الشغل بيتم مرتين في الأسبوع، فبنستخدم نافذة مش يوم بالظبط. alerted_on بيمنع التكرار.
     """
     out = []
+    nums = _numbers_by_id(rows)
     for r in rows:
         if not is_open(r) or r.get("alerted_on") is not None:
             continue
@@ -703,6 +728,7 @@ def due_alerts(
         out.append(
             {
                 "id": r["id"],
+                "no": nums[r["id"]],
                 "days_left": days_left,
                 "maturity_date": r["maturity_date"],
                 "face_value": float(r["face_value"]),
@@ -716,12 +742,13 @@ def due_alerts(
 
 def alert_text(a: Dict[str, Any]) -> str:
     d = a["days_left"]
+    no = a["no"] if "no" in a else a["id"]
     if d < 0:
-        head = f"أذن #{a['id']} استحق من {-d} يوم ({a['maturity_date'].isoformat()}) وأرقام الكشف لسه مش مسجلة"
+        head = f"أذن #{no} استحق من {-d} يوم ({a['maturity_date'].isoformat()}) وأرقام الكشف لسه مش مسجلة"
     elif d == 0:
-        head = f"أذن #{a['id']} بيستحق النهارده ({a['maturity_date'].isoformat()})"
+        head = f"أذن #{no} بيستحق النهارده ({a['maturity_date'].isoformat()})"
     else:
-        head = f"أذن #{a['id']} بيستحق بعد {d} يوم ({a['maturity_date'].isoformat()})"
+        head = f"أذن #{no} بيستحق بعد {d} يوم ({a['maturity_date'].isoformat()})"
     return (
         f"⏰ {head}\n"
         f"القيمة الاسمية: {a['face_value']:,.2f} جنيه\n"
