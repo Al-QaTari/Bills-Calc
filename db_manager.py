@@ -13,7 +13,7 @@ from pathlib import Path
 
 from treasury_core.ports import HistoricalDataStore
 import constants as C
-from gaps import find_session_gaps
+from gaps import ISSUE_DATE_COLUMN, find_session_gaps
 from tenors import (
     normalize_tenor_column,
     latest_active_rows,
@@ -256,6 +256,8 @@ class SQLiteDBManager(HistoricalDataStore):
                 """)
 
                 chunk_df = pd.read_sql_query(query, self.engine)
+                # عمود تاريخ الإصدار للمطابقة وكشف الفجوات بس، مش جزء من بيانات العرض
+                chunk_df = chunk_df.drop(columns=[ISSUE_DATE_COLUMN], errors="ignore")
 
                 if chunk_df.empty:
                     break
@@ -393,11 +395,18 @@ class SQLiteDBManager(HistoricalDataStore):
     def detect_data_gaps(self) -> List[Dict[str, Any]]:
         try:
             with self.engine.connect() as conn:
+                from sqlalchemy import inspect as _sa_inspect
+
+                has_issue = any(
+                    col["name"] == ISSUE_DATE_COLUMN
+                    for col in _sa_inspect(conn).get_columns(C.TABLE_NAME)
+                )
+                issue_select = f', "{ISSUE_DATE_COLUMN}"' if has_issue else ""
                 query = text(f"""
-                    SELECT DISTINCT "{C.TENOR_COLUMN_NAME}", "{C.SESSION_DATE_COLUMN_NAME}"
+                    SELECT DISTINCT "{C.TENOR_COLUMN_NAME}", "{C.SESSION_DATE_COLUMN_NAME}"{issue_select}
                     FROM "{C.TABLE_NAME}"
                     """)
-                rows = [(row[0], row[1]) for row in conn.execute(query).fetchall()]
+                rows = [tuple(row) for row in conn.execute(query).fetchall()]
             return find_session_gaps(rows)
         except Exception as e:
             logger.error(f"فشل في كشف الفجوات: {str(e)}", exc_info=True)

@@ -9,8 +9,11 @@
 تشغيله من غير --apply تجربة (dry-run): بيطبع اللي هيتضاف ومش بيكتب أي حاجة.
 
 قواعد الأمان (مهمة):
-- الكتابة بس مع --apply، وبـ INSERT ... ON CONFLICT DO NOTHING جوه معاملة واحدة.
-  مفيش UPDATE ولا DELETE، فالصفوف الموجودة مستحيل تتغيّر.
+- الكتابة بس مع --apply، جوه معاملة واحدة. الإضافة بـ INSERT ... ON CONFLICT DO NOTHING.
+  الاستثناء الوحيد عمود "issue_date" (تاريخ الإصدار الرسمي، إضافة بس): بيتضاف للجدول
+  لو مش موجود، وبيتملي للصف اللي فاضي فيه بـ UPDATE ... WHERE issue_date IS NULL
+  بعد مطابقة واضحة (الأجل + العائد + الأسبوع) مع الصفحة الرسمية. مفيش حذف، ومفيش
+  أي عمود تاني بيتغيّر، وأي مطابقة مش واضحة بتتساب فاضية وبتتسجّل.
 - الهدف الافتراضي PostgreSQL (POSTGRES_URI): لو المتغير مش موجود بيقف، مفيش بديل صامت.
   --target sqlite:المسار بيضيف نسخة SQLite المحفوظة في المستودع (data/cbe_historical_data.db)
   عشان تفضل زي PostgreSQL. كل هدف مستقل: فشل واحد مايوقفش التاني.
@@ -32,6 +35,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 import constants as C
 from gaps import (
     DATE_FORMAT,
+    ISSUE_DATE_COLUMN,
     ISSUE_OFFSET_DAYS_BY_TENOR,
     SESSION_WEEKDAY_BY_TENOR,
     parse_session_date,
@@ -78,6 +82,9 @@ class Plan:
     needs_review: List[Dict[str, Any]] = field(default_factory=list)
     skipped_old: int = 0
     skipped_future: int = 0
+    issue_fills: List[Dict[str, Any]] = field(default_factory=list)
+    issue_ambiguous: List[Dict[str, Any]] = field(default_factory=list)
+    issue_unmatched: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -215,16 +222,32 @@ def build_plan(
     db_rows: Sequence[Tuple[int, str, float]],
     since: date,
     today: date,
+    issue_map: Optional[Dict[Tuple[int, str], Optional[str]]] = None,
 ) -> Plan:
-    """قارن العطاءات الرسمية بصفوف القاعدة (الأجل، تاريخ الجلسة، العائد)."""
+    """قارن العطاءات الرسمية بصفوف القاعدة (الأجل، تاريخ الجلسة، العائد).
+
+    issue_map: (الأجل، تاريخ الجلسة) -> تاريخ الإصدار الرسمي المخزّن (أو None).
+    الصف اللي تاريخ إصداره معروف بيتطابق على التاريخ ده مباشرة، ومش بيدخل في
+    مطابقة الأسبوع لعطاء تاني.
+    """
+    issue_map = issue_map or {}
     db_by_nominal: Dict[int, List[Tuple[date, float, str]]] = {}
+    known_issue: Dict[Tuple[int, date], float] = {}
+    known_issue_exact: Dict[Tuple[int, date], float] = {}
     db_keys = set()
     for tenor, session_text, yield_pct in db_rows:
         parsed = parse_session_date(session_text)
         if parsed is None:
             continue
         nominal = normalize_tenor(tenor)
-        db_by_nominal.setdefault(nominal, []).append((parsed, yield_pct, session_text))
+        stored_issue = parse_session_date(issue_map.get((int(tenor), session_text)))
+        if stored_issue is not None:
+            known_issue.setdefault((nominal, stored_issue), yield_pct)
+            known_issue_exact[(int(tenor), stored_issue)] = yield_pct
+        else:
+            db_by_nominal.setdefault(nominal, []).append(
+                (parsed, yield_pct, session_text)
+            )
         db_keys.add((int(tenor), session_text))
 
     plan = Plan()
@@ -233,6 +256,23 @@ def build_plan(
             plan.skipped_old += 1
             continue
         nominal = normalize_tenor(auction.tenor)
+        stored_yield = known_issue_exact.get((auction.tenor, auction.issue))
+        if stored_yield is None:
+            stored_yield = known_issue.get((nominal, auction.issue))
+        if stored_yield is not None:
+            if abs(stored_yield - auction.yield_pct) <= YIELD_TOLERANCE:
+                plan.already_present += 1
+            else:
+                plan.conflicts.append(
+                    {
+                        "tenor": auction.tenor,
+                        "issue": auction.issue.strftime(DATE_FORMAT),
+                        "yield": auction.yield_pct,
+                        "db_session": "إصدار " + auction.issue.strftime(DATE_FORMAT),
+                        "db_yield": stored_yield,
+                    }
+                )
+            continue
         window = [
             (session, y)
             for session, y, _ in db_by_nominal.get(nominal, [])
@@ -294,6 +334,86 @@ def check_plan_is_sane(plan: Plan, parsed_count: int, rejected_count: int) -> No
         )
 
 
+def plan_issue_fills(
+    official: Sequence[OfficialAuction],
+    db_rows: Sequence[Tuple[int, str, float]],
+    issue_map: Dict[Tuple[int, str], Optional[str]],
+    plan: Plan,
+) -> None:
+    """املي تاريخ الإصدار الرسمي للصفوف الفاضية بمطابقة واضحة بس.
+
+    المطابقة: نفس الأجل الأساسي + نفس العائد (±0.0005) + الإصدار بعد الجلسة بـ 0-6 أيام.
+    لو فيه أكتر من احتمال، بنختار اللي تاريخ جلسته المتوقع = تاريخ الجلسة المخزّن،
+    ولو لسه مش واحد: غامض، بيتساب فاضي. وأي إصدار اتطابق مع صفين مختلفين لنفس
+    الأجل (بنفس الأجل بالظبط)، الاتنين بيتساب فاضيين (مش بنخمّن).
+    """
+    by_nominal: Dict[int, List[OfficialAuction]] = {}
+    for auction in official:
+        by_nominal.setdefault(normalize_tenor(auction.tenor), []).append(auction)
+
+    claimed: Dict[Tuple[int, date], List[Tuple[int, str]]] = {}
+    for key, stored in issue_map.items():
+        parsed_issue = parse_session_date(stored)
+        if parsed_issue is not None:
+            claimed.setdefault((int(key[0]), parsed_issue), []).append(key)
+
+    candidates: List[Tuple[Tuple[int, str], int, date, float]] = []
+    for tenor, session_text, yield_pct in db_rows:
+        key = (int(tenor), session_text)
+        if issue_map.get(key):
+            continue  # فيه قيمة مخزّنة (حتى لو مش تاريخ صالح): ما نلمسهاش
+        session = parse_session_date(session_text)
+        if session is None:
+            continue
+        nominal = normalize_tenor(tenor)
+        found = [
+            a
+            for a in by_nominal.get(nominal, [])
+            if 0 <= (a.issue - session).days <= MAX_SESSION_TO_ISSUE_DAYS
+            and abs(a.yield_pct - yield_pct) <= YIELD_TOLERANCE
+        ]
+        same_tenor = [a for a in found if a.tenor == int(tenor)]
+        if same_tenor:
+            found = same_tenor  # أجل غير أساسي (336 مثلًا) بيتطابق مع نفس أجله الرسمي
+        if len(found) > 1:
+            exact = [
+                a for a in found if infer_session_date(a.tenor, a.issue)[0] == session
+            ]
+            found = exact
+        if len(found) == 1:
+            candidates.append((key, int(tenor), found[0].issue, yield_pct))
+        elif len(found) > 1:
+            plan.issue_ambiguous.append(
+                {
+                    "tenor": int(tenor),
+                    "session_date": session_text,
+                    "reason": "أكتر من إصدار رسمي مطابق",
+                }
+            )
+        else:
+            plan.issue_unmatched += 1
+
+    for key, exact_tenor, issue, _ in candidates:
+        claimed.setdefault((exact_tenor, issue), []).append(key)
+    for key, exact_tenor, issue, _ in candidates:
+        if len(claimed[(exact_tenor, issue)]) > 1:
+            plan.issue_ambiguous.append(
+                {
+                    "tenor": key[0],
+                    "session_date": key[1],
+                    "reason": f"أكتر من صف بيطابق إصدار {issue.strftime(DATE_FORMAT)}",
+                }
+            )
+        else:
+            plan.issue_fills.append(
+                {
+                    "tenor": key[0],
+                    "session_date": key[1],
+                    "issue_date": issue.strftime(DATE_FORMAT),
+                }
+            )
+
+
 # ---------------------------------------------------------------------------
 # القاعدة
 # ---------------------------------------------------------------------------
@@ -330,6 +450,92 @@ def load_db_rows(conn) -> List[Tuple[int, str, float]]:
     return [(int(t), str(s), float(y)) for t, s, y in result.fetchall()]
 
 
+def has_issue_column(conn) -> bool:
+    from sqlalchemy import inspect
+
+    columns = inspect(conn).get_columns(C.TABLE_NAME)
+    return any(c["name"] == ISSUE_DATE_COLUMN for c in columns)
+
+
+def ensure_issue_column(engine, kind: str) -> bool:
+    """أضف عمود issue_date (TEXT، يقبل NULL) لو مش موجود. إضافة بس. بيرجّع True لو اتضاف."""
+    from sqlalchemy import text
+
+    with engine.connect() as conn:
+        if has_issue_column(conn):
+            return False
+    clause = "IF NOT EXISTS " if kind == "postgres" else ""
+    with engine.connect() as conn:
+        with conn.begin():
+            conn.execute(
+                text(
+                    f'ALTER TABLE "{C.TABLE_NAME}" ADD COLUMN {clause}"{ISSUE_DATE_COLUMN}" TEXT'
+                )
+            )
+    return True
+
+
+def load_issue_dates(conn) -> Dict[Tuple[int, str], Optional[str]]:
+    """(الأجل، تاريخ الجلسة) -> تاريخ الإصدار المخزّن. فاضي لو العمود لسه مش موجود."""
+    from sqlalchemy import text
+
+    if not has_issue_column(conn):
+        return {}
+    result = conn.execute(
+        text(
+            f'SELECT "{C.TENOR_COLUMN_NAME}", "{C.SESSION_DATE_COLUMN_NAME}", '
+            f'"{ISSUE_DATE_COLUMN}" FROM "{C.TABLE_NAME}"'
+        )
+    )
+    return {(int(t), str(s)): (str(i) if i else None) for t, s, i in result.fetchall()}
+
+
+def apply_issue_fills(conn, fills: Sequence[Dict[str, Any]]) -> int:
+    """UPDATE لعمود issue_date بس، وللصف الفاضي بس (IS NULL). بيرجّع عدد الصفوف."""
+    from sqlalchemy import text
+
+    statement = text(
+        f'UPDATE "{C.TABLE_NAME}" SET "{ISSUE_DATE_COLUMN}" = :issue '
+        f'WHERE "{C.TENOR_COLUMN_NAME}" = :tenor '
+        f'AND "{C.SESSION_DATE_COLUMN_NAME}" = :session '
+        f'AND "{ISSUE_DATE_COLUMN}" IS NULL'
+    )
+    updated = 0
+    for row in fills:
+        result = conn.execute(
+            statement,
+            {
+                "issue": row["issue_date"],
+                "tenor": int(row["tenor"]),
+                "session": row["session_date"],
+            },
+        )
+        updated += max(result.rowcount, 0)
+    return updated
+
+
+def verify_issue_dates(
+    before: Dict[Tuple[int, str], Optional[str]],
+    after: Dict[Tuple[int, str], Optional[str]],
+    fills: Sequence[Dict[str, Any]],
+    inserted_rows: Sequence[Dict[str, Any]],
+) -> List[str]:
+    """أي تاريخ إصدار كان مخزّن ما اتغيّرش، وكل تعبئة وكل صف جديد ليه إصداره."""
+    problems: List[str] = []
+    for key, old in before.items():
+        if old and after.get(key) != old:
+            problems.append(f"تاريخ إصدار قديم اتغيّر: {key}")
+    for row in fills:
+        key = (int(row["tenor"]), row["session_date"])
+        if after.get(key) != row["issue_date"]:
+            problems.append(f"تاريخ الإصدار مااتملاش: {key}")
+    for row in inserted_rows:
+        key = (int(row["tenor"]), row["session_date"])
+        if after.get(key) != row["issue"]:
+            problems.append(f"تاريخ إصدار الصف الجديد غلط: {key}")
+    return problems
+
+
 def insert_missing(conn, kind: str, rows: Sequence[Dict[str, Any]]) -> int:
     """INSERT ... ON CONFLICT DO NOTHING لكل صف. يرجّع عدد الصفوف اللي اتكتبت فعلًا."""
     from sqlalchemy import text
@@ -341,8 +547,8 @@ def insert_missing(conn, kind: str, rows: Sequence[Dict[str, Any]]) -> int:
     statement = text(
         f'INSERT INTO "{C.TABLE_NAME}" '
         f'("{C.TENOR_COLUMN_NAME}", "{C.YIELD_COLUMN_NAME}", '
-        f'"{C.SESSION_DATE_COLUMN_NAME}", "{C.DATE_COLUMN_NAME}") '
-        "VALUES (:tenor, :yield, :session_date, :scrape_date) "
+        f'"{C.SESSION_DATE_COLUMN_NAME}", "{C.DATE_COLUMN_NAME}", "{ISSUE_DATE_COLUMN}") '
+        "VALUES (:tenor, :yield, :session_date, :scrape_date, :issue_date) "
         f'ON CONFLICT ("{C.TENOR_COLUMN_NAME}", "{C.SESSION_DATE_COLUMN_NAME}") DO NOTHING'
     )
     inserted = 0
@@ -354,6 +560,7 @@ def insert_missing(conn, kind: str, rows: Sequence[Dict[str, Any]]) -> int:
                 "yield": float(row["yield"]),
                 "session_date": row["session_date"],
                 "scrape_date": scrape_value,
+                "issue_date": row["issue"],
             },
         )
         inserted += max(result.rowcount, 0)
@@ -400,6 +607,21 @@ def format_report(plan: Plan, since: date, apply: bool, label: str = "") -> str:
     ]
     if plan.skipped_future:
         lines.append(f"جلسات مستقبلية (اتخطّت): {plan.skipped_future}")
+    lines.append(
+        f"تاريخ إصدار رسمي هيتملي لصفوف موجودة: {len(plan.issue_fills)}"
+        f" | غامض (هيتساب فاضي): {len(plan.issue_ambiguous)}"
+        f" | مفيش مطابقة رسمية: {plan.issue_unmatched}"
+    )
+    for row in plan.issue_fills[:5]:
+        lines.append(
+            f"  ~ أجل {row['tenor']} | جلسة {row['session_date']} -> إصدار {row['issue_date']}"
+        )
+    if len(plan.issue_fills) > 5:
+        lines.append(f"  ~ ... و{len(plan.issue_fills) - 5} صف تاني")
+    for row in plan.issue_ambiguous:
+        lines.append(
+            f"  ? إصدار غامض: أجل {row['tenor']} جلسة {row['session_date']} ({row['reason']})"
+        )
     for row in plan.to_insert:
         lines.append(
             f"  + أجل {row['tenor']} | جلسة {row['session_date']} "
@@ -436,6 +658,7 @@ class Target:
     kind: str
     db_rows: List[Tuple[int, str, float]]
     since: date
+    issue_map: Dict[Tuple[int, str], Optional[str]] = field(default_factory=dict)
 
 
 def _open_target(spec: str, since_arg: Optional[str]) -> Target:
@@ -443,6 +666,7 @@ def _open_target(spec: str, since_arg: Optional[str]) -> Target:
     try:
         with engine.connect() as conn:
             db_rows = load_db_rows(conn)
+            issue_map = load_issue_dates(conn)
         if not db_rows:
             raise RuntimeError("جدول العوائد فاضي: ده مش المكان المناسب للملء التاريخي")
         db_dates = [d for d in (parse_session_date(s) for _, s, _ in db_rows) if d]
@@ -451,7 +675,7 @@ def _open_target(spec: str, since_arg: Optional[str]) -> Target:
         since = parse_session_date(since_arg) if since_arg else min(db_dates)
         if since is None:
             raise RuntimeError("--since لازم تكون بصيغة DD/MM/YYYY")
-        return Target(spec, engine, kind, db_rows, since)
+        return Target(spec, engine, kind, db_rows, since, issue_map)
     except Exception:
         engine.dispose()
         raise
@@ -465,7 +689,8 @@ def _process_target(
     apply: bool,
     max_insert: int,
 ) -> int:
-    plan = build_plan(official, target.db_rows, target.since, today)
+    plan = build_plan(official, target.db_rows, target.since, today, target.issue_map)
+    plan_issue_fills(official, target.db_rows, target.issue_map, plan)
     print(format_report(plan, target.since, apply=apply, label=target.name))
     check_plan_is_sane(plan, len(official), rejected_count)
     for row in plan.conflicts:
@@ -479,27 +704,44 @@ def _process_target(
             "warning",
             f"[{target.name}] عطاء يحتاج مراجعة أجل {row['tenor']} إصدار {row['issue']}: {row['reason']}",
         )
+    for row in plan.issue_ambiguous:
+        _annotate(
+            "warning",
+            f"[{target.name}] تاريخ الإصدار غامض لأجل {row['tenor']} جلسة {row['session_date']}: {row['reason']}",
+        )
     if not apply:
         return 0
-    if not plan.to_insert:
-        print(f"[{target.name}] لا يوجد ما يُضاف.")
+    if not plan.to_insert and not plan.issue_fills:
+        print(f"[{target.name}] لا يوجد ما يُضاف أو يتملي.")
         return 0
     if len(plan.to_insert) > max_insert:
         raise RuntimeError(
             f"عدد الصفوف الجديدة {len(plan.to_insert)} أكبر من الحد {max_insert}: لم يتم تنفيذ شيء"
         )
+    if ensure_issue_column(target.engine, target.kind):
+        print(f"[{target.name}] اتضاف عمود {ISSUE_DATE_COLUMN} (فاضي لحد ما يتملي).")
     with target.engine.connect() as conn:
         with conn.begin():
+            filled = apply_issue_fills(conn, plan.issue_fills)
             inserted = insert_missing(conn, target.kind, plan.to_insert)
     with target.engine.connect() as conn:
         after = load_db_rows(conn)
+        after_issue = load_issue_dates(conn)
     problems = verify_after_apply(target.db_rows, after, plan.to_insert)
-    if problems or inserted != len(plan.to_insert):
+    problems += verify_issue_dates(
+        target.issue_map, after_issue, plan.issue_fills, plan.to_insert
+    )
+    if problems or inserted != len(plan.to_insert) or filled != len(plan.issue_fills):
         for problem in problems:
             print(f"[{target.name}] خطأ تحقق: {problem}")
-        print(f"[{target.name}] اتضاف {inserted} من {len(plan.to_insert)}")
+        print(
+            f"[{target.name}] اتضاف {inserted} من {len(plan.to_insert)}"
+            f" واتملى إصدار {filled} من {len(plan.issue_fills)}"
+        )
         return 1
-    print(f"[{target.name}] تم إضافة {inserted} صف والتحقق منها.")
+    print(
+        f"[{target.name}] تم إضافة {inserted} صف وتعبئة تاريخ إصدار {filled} صف والتحقق منهم."
+    )
     return 0
 
 
