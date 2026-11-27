@@ -239,3 +239,55 @@ def test_postgres_stale_fix_and_scrape_date_end_to_end(monkeypatch, official_fil
     finally:
         m.dispose_shared_engines()
         srv.cleanup()
+
+
+# ---------------------------------- نافذة السحب من الصفحة الرسمية + الجلسات المنتظرة
+def test_fetch_starts_two_weeks_before_the_first_db_session(
+    tmp_path, monkeypatch, capsys
+):
+    seen = {}
+
+    async def fake_fetch(from_date, to_date):
+        seen["from"] = from_date
+        return OFFICIAL
+
+    monkeypatch.setattr(bf, "fetch_official_rows", fake_fetch)
+    db = _make_sqlite(tmp_path / "w.db")
+    assert _run("--target", f"sqlite:{db}") == 0
+    assert seen["from"] == bf.official_fetch_start(bf.date(2026, 8, 6))
+    assert (bf.date(2026, 8, 6) - seen["from"]).days == 14
+
+
+def test_stale_rule_needs_the_previous_week_in_the_fetched_range():
+    # بدون إصدار الأسبوع اللي قبله مفيش تصليح (آمن)، ومعاه التصليح بيشتغل
+    prev = ["91", "E0", "08/07/2025", "07/10/2025", "1", "1", "1", "1", "1", "27.558"]
+    cur = ["91", "E1", "15/07/2025", "14/10/2025", "1", "1", "1", "1", "1", "27.977"]
+    db = [(91, "11/07/2025", 27.558)]
+    for rows, expected in (([cur], 0), ([prev, cur], 1)):
+        parsed, _ = bf.parse_official_rows(rows)
+        plan = bf.build_plan(
+            parsed, db, bf.date(2025, 7, 10), bf.date(2026, 11, 27), {}
+        )
+        bf.plan_stale_fixes(parsed, plan)
+        assert len(plan.stale_fixes) == expected
+
+
+def test_latest_session_not_yet_on_the_official_page_is_pending_not_unmatched():
+    # آخر عطاء (الخميس 26/11) إصداره 01/12 وده لسه مش في الصفحة الرسمية
+    rows = DB_ROWS + [(182, "26/11/2026", 25.736), (364, "26/11/2026", 26.351)]
+    official = OFFICIAL + [
+        ["91", "E9", "24/11/2026", "23/02/2027", "1", "1", "1", "1", "1", "24.9"]
+    ]
+    parsed, _ = bf.parse_official_rows(official)
+    plan = bf.build_plan(parsed, rows, bf.date(2026, 8, 1), bf.date(2026, 11, 27), {})
+    bf.plan_issue_fills(parsed, rows, {}, plan)
+    assert plan.issue_pending == 2
+    assert not any(r["session_date"] == "26/11/2026" for r in plan.issue_unmatched_rows)
+
+
+def test_old_unmatched_row_is_still_reported_even_with_pending_logic():
+    rows = DB_ROWS + [(91, "20/08/2026", 19.0)]
+    parsed, _ = bf.parse_official_rows(OFFICIAL)
+    plan = bf.build_plan(parsed, rows, bf.date(2026, 8, 1), bf.date(2026, 11, 27), {})
+    bf.plan_issue_fills(parsed, rows, {}, plan)
+    assert any(r["session_date"] == "20/08/2026" for r in plan.issue_unmatched_rows)

@@ -87,6 +87,7 @@ class Plan:
     issue_unmatched: int = 0
     scrape_repairs: List[Dict[str, Any]] = field(default_factory=list)
     issue_unmatched_rows: List[Dict[str, Any]] = field(default_factory=list)
+    issue_pending: int = 0
     stale_fixes: List[Dict[str, Any]] = field(default_factory=list)
 
 
@@ -349,6 +350,13 @@ def check_plan_is_sane(plan: Plan, parsed_count: int, rejected_count: int) -> No
 
 
 MAX_STALE_FIXES = 20
+# بنسحب من الصفحة الرسمية أسبوعين قبل بداية القاعدة: قاعدة التصليح محتاجة نتيجة
+# الأسبوع اللي قبل أول عطاء في القاعدة (وإلا أول أسبوع ما يتقارنش بالسابق).
+OFFICIAL_LOOKBACK_DAYS = 14
+
+
+def official_fetch_start(since: date) -> date:
+    return since - timedelta(days=OFFICIAL_LOOKBACK_DAYS)
 
 
 def plan_stale_fixes(official: Sequence[OfficialAuction], plan: Plan) -> None:
@@ -472,6 +480,7 @@ def plan_issue_fills(
     ولو لسه مش واحد: غامض، بيتساب فاضي. وأي إصدار اتطابق مع صفين مختلفين لنفس
     الأجل (بنفس الأجل بالظبط)، الاتنين بيتساب فاضيين (مش بنخمّن).
     """
+    latest_issue = max((a.issue for a in official), default=None)
     by_nominal: Dict[int, List[OfficialAuction]] = {}
     for auction in official:
         by_nominal.setdefault(normalize_tenor(auction.tenor), []).append(auction)
@@ -514,6 +523,14 @@ def plan_issue_fills(
                     "session_date": session_text,
                     "reason": "أكتر من إصدار رسمي مطابق",
                 }
+            )
+        elif (
+            latest_issue is not None
+            and session + timedelta(days=min(ISSUE_OFFSET_DAYS_BY_TENOR.values()))
+            > latest_issue
+        ):
+            plan.issue_pending += (
+                1  # عطاء لسه ما نزلش في الصفحة الرسمية (الإصدار بعد آخر إصدار فيها)
             )
         else:
             plan.issue_unmatched += 1
@@ -824,6 +841,7 @@ def format_report(plan: Plan, since: date, apply: bool, label: str = "") -> str:
         f"تاريخ إصدار رسمي هيتملي لصفوف موجودة: {len(plan.issue_fills)}"
         f" | غامض (هيتساب فاضي): {len(plan.issue_ambiguous)}"
         f" | مفيش مطابقة رسمية: {plan.issue_unmatched}"
+        f" | في انتظار الصفحة الرسمية: {plan.issue_pending}"
     )
     for row in plan.issue_fills[:5]:
         lines.append(
@@ -1043,7 +1061,9 @@ def run(args: argparse.Namespace) -> int:
         else:
             try:
                 raw_rows = asyncio.run(
-                    fetch_official_rows(min(t.since for t in targets), today)
+                    fetch_official_rows(
+                        official_fetch_start(min(t.since for t in targets)), today
+                    )
                 )
             except FetchError as exc:
                 print(
