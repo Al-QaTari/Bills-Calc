@@ -47,7 +47,7 @@ def run(today: date, rows, enabled: bool, sender=send, store=None) -> int:
                 try:
                     store.mark_alerted(a["id"], today)
                 except Exception as e:  # noqa: BLE001
-                    print(f"sent #{a['id']} but could not mark it: {type(e).__name__}")
+                    print(f"sent #{a['no']} but could not mark it: {type(e).__name__}")
         else:
             failed += 1
     if failed:

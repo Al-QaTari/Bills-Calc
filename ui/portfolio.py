@@ -142,9 +142,20 @@ def render_save_to_ledger() -> None:
                 return
             st.session_state["ledger_save_open"] = False
             st.session_state["ledger_flash"] = (
-                f"✅ اتسجل الأذن في المحفظة (رقم {new_id})."
+                f"✅ اتسجل الأذن في المحفظة{_new_bill_label(store, new_id)}."
             )
             st.rerun()
+
+
+def _new_bill_label(store, new_id) -> str:
+    """رقم الأذن الجديد بين الأذون الموجودة فعلاً (مش عداد القاعدة)."""
+    try:
+        for r in ledger.number_rows(store.list_all()):
+            if r["id"] == new_id:
+                return f" (رقم {r['no']})"
+    except Exception as e:  # noqa: BLE001
+        logger.error("ledger number read failed: %s", type(e).__name__)
+    return ""
 
 
 def _money(v):
@@ -157,7 +168,7 @@ def _rows_dataframe(rows) -> pd.DataFrame:
         rn = ledger.realized_net(r)
         out.append(
             {
-                "#": r["id"],
+                "#": ledger.display_no(r),
                 "الحالة": (
                     "نزلت الفلوس"
                     if ledger.is_settled(r)
@@ -206,7 +217,7 @@ def render_sale_to_ledger(inputs, result) -> None:
         try:
             open_rows = [
                 r
-                for r in store.list_all()
+                for r in ledger.number_rows(store.list_all())
                 if not ledger.is_settled(r) and not ledger.is_sold(r)
             ]
         except Exception as e:  # noqa: BLE001
@@ -223,7 +234,7 @@ def render_sale_to_ledger(inputs, result) -> None:
             "أي أذن بعته؟",
             options=list(by_id),
             format_func=lambda i: (
-                f"#{i} • {by_id[i]['face_value']:,.0f} • {by_id[i]['tenor_days']} يوم"
+                f"#{ledger.display_no(by_id[i])} • {by_id[i]['face_value']:,.0f} • {by_id[i]['tenor_days']} يوم"
             ),
             key="ledger_sale_select",
         )
@@ -254,7 +265,9 @@ def render_sale_to_ledger(inputs, result) -> None:
                 st.error("تعذر الحفظ. مفيش حاجة اتسجلت.")
                 return
             st.session_state["ledger_sale_open"] = False
-            st.session_state["ledger_flash_sale"] = f"✅ اتسجل بيع الأذن #{sel}."
+            st.session_state["ledger_flash_sale"] = (
+                f"✅ اتسجل بيع الأذن #{ledger.display_no(by_id[sel])}."
+            )
             st.rerun()
 
 
@@ -387,7 +400,7 @@ def render_timeline(rows) -> None:
             label = ledger.countdown_html(i["maturity_date"], _now_ms())
         html.append(
             f"<div class='tl-row tl-{i['status']}'>"
-            f"<div class='tl-name'>#{i['id']} • {i['tenor_days']} يوم"
+            f"<div class='tl-name'>#{i['no']} • {i['tenor_days']} يوم"
             f"<small>{format_currency(i['face_value'])}</small></div>"
             f"<div><div class='tl-track'><div class='tl-fill' style='width:{i['pct']}%'></div></div>"
             f"<div class='tl-dates'><span>{i['issue_date'].isoformat()}</span>"
@@ -547,7 +560,7 @@ def render_portfolio() -> None:
             st.rerun()
 
     try:
-        rows = store.list_all()
+        rows = ledger.number_rows(store.list_all())
     except Exception as e:  # noqa: BLE001
         logger.error("ledger read failed: %s", type(e).__name__)
         st.error("تعذر قراءة الدفتر.")
@@ -648,7 +661,7 @@ def render_portfolio() -> None:
         "اختار الأذن",
         options=list(by_id.keys()),
         format_func=lambda i: (
-            f"#{i} • {by_id[i]['face_value']:,.0f} • {by_id[i]['tenor_days']} يوم"
+            f"#{ledger.display_no(by_id[i])} • {by_id[i]['face_value']:,.0f} • {by_id[i]['tenor_days']} يوم"
         ),
         key="ledger_select",
     )
@@ -675,5 +688,7 @@ def render_portfolio() -> None:
                 logger.error("ledger delete failed: %s", type(e).__name__)
                 st.error("تعذر الحذف (القاعدة مش متاحة). مفيش حاجة اتمسحت.")
                 return
-            st.session_state["ledger_flash_del"] = f"🗑️ اتحذف الأذن #{sel}."
+            st.session_state["ledger_flash_del"] = (
+                f"🗑️ اتحذف الأذن #{ledger.display_no(r)}."
+            )
             st.rerun()
