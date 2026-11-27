@@ -245,9 +245,6 @@ def render_secondary_sale_calculator():
 
     if result_to_display:
         display_secondary_results(result_to_display)
-        st.caption(
-            "الأرقام هنا قبل رسوم البنك. رسوم البيع والحفظ بتتحسب في «محفظتي» لما تسجل البيع."
-        )
         render_sale_to_ledger(secondary_results_repo.get("inputs"), result_to_display)
 
     # --- قسم شرح المعادلات (قابل للطي) ---

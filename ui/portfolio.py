@@ -74,13 +74,6 @@ def render_save_to_ledger() -> None:
             return
 
         issue_default = cairo_now().date()
-        st.caption(
-            "كل حاجة بتتحسب لوحدها: الاستحقاق = الإصدار + الأجل، الضريبة بنسبتك، "
-            "ورسوم البنك كتقدير: الشراء 2.5 لكل 100 ألف، الاستحقاق 1 في الألف (كل واحد بحد أقصى 1000)، "
-            "والحفظ 0.02% سنويًا. الرسوم دي من جدول رسوم أمين الحفظ ولا تشمل الرسوم السيادية "
-            "(المقاصة والإيداع والبنك المركزي والرقابة المالية). "
-            "تقدر تعدّل أي رقم قبل الحفظ، أو تحفظ على طول."
-        )
         with st.expander("✏️ تعديل التواريخ والرسوم (اختياري)"):
             issue = st.date_input(
                 "تاريخ الإصدار (يوم تسليم الأذن ودفع الفلوس)",
@@ -410,18 +403,11 @@ def render_timeline(rows) -> None:
 _CENTER_CSS = """
 <style>
 .pf-h{text-align:center;font-size:1.25rem;font-weight:700;color:var(--text-primary);margin:1.4rem 0 .6rem}
-[data-testid="stCaptionContainer"],[data-testid="stAlert"],[data-testid="stWidgetLabel"],
-[data-testid="stWidgetLabel"] p{text-align:center;justify-content:center;width:100%}
-[data-testid="stElementContainer"]:has([data-testid="stRadio"]){width:100% !important}
-[data-testid="stRadio"],[data-testid="stRadio"] > div{width:100%;align-items:center}
-[data-testid="stRadio"] [role="radiogroup"]{justify-content:center;width:100%}
 [data-testid="stSelectbox"] div[data-baseweb="select"] > div{justify-content:center}
 [data-testid="stSelectbox"] div[data-baseweb="select"] > div > div:first-child{flex:1 1 auto;justify-content:center;text-align:center;display:flex}
 [data-testid="stSelectbox"] [data-baseweb="select"] div[value],[data-testid="stSelectbox"] [data-baseweb="select"] input{text-align:center}
 [data-testid="stFormSubmitButton"]{display:flex;justify-content:center}
 .stButton,.stDownloadButton{display:flex;justify-content:center}
-[data-testid="stForm"],[data-testid="stCheckbox"]{text-align:center}
-[data-testid="stCheckbox"]{display:flex;justify-content:center}
 .metric-card .metric-sub{text-align:center}
 /* ستريمليت 1.65: الخانة المقفولة input والقائمة بصفوف ارتفاعها ثابت، فلف النص مش ممكن.
    عشان كده اسم الأذن قصير (رقم • قيمة • أجل) والتواريخ في السطر اللي تحته. أي نص أطول بيتقطع بـ ... */

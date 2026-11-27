@@ -232,12 +232,6 @@ def display_primary_results(
             f"<span class='metric-value'>{format_currency(result.net_return - fees['total'])}</span></div></div>",
             unsafe_allow_html=True,
         )
-        st.caption(
-            f"الرسوم التقديرية: شراء {format_currency(fees['purchase'])} + استحقاق "
-            f"{format_currency(fees['redemption'])} + حفظ {format_currency(fees['custody'])} "
-            f"= {format_currency(fees['total'])}. حسب جدول رسوم أمين الحفظ، ولا تشمل الرسوم السيادية. "
-            "تقدر تسجل الشراء في «محفظتي» بزر «اشتريت هذا الأذن» تحت."
-        )
 
     st.info(
         "تذكر أن قيمة الإذن عند الاستحقاق ثابتة وهي القيمة الاسمية، بينما يختلف سعر الشراء حسب معدل العائد."
